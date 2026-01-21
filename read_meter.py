@@ -421,6 +421,11 @@ def read_ocr_digits_mechanical(frame, x, y, w, h):
     
     print(f"  OCR Mechanical mode: Processing region ({x},{y},{w},{h})")
     
+    # Save the raw ROI for debugging
+    if OCR_DEBUG:
+        cv2.imwrite('data/_debug_ocr_roi.png', roi)
+        print(f"  Raw OCR region saved to data/_debug_ocr_roi.png")
+    
     # Detect individual digit windows
     digit_boxes = detect_digit_windows(roi)
     
