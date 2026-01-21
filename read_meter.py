@@ -292,7 +292,8 @@ def process_values(values):
     return reading
 
 def rotate_image(image, angle):
-    """Rotate image by specified angle (degrees) around center."""
+    """Rotate image by specified angle (degrees) around center.
+    Positive angle = counter-clockwise, Negative angle = clockwise"""
     height, width = image.shape[:2]
     center = (width / 2, height / 2)
     rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
@@ -545,8 +546,8 @@ def main():
                             # Rotate image 90 degrees clockwise
                             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                         
-                        # Apply 3-degree fine rotation for alignment
-                        frame = rotate_image(frame, 3)
+                        # Apply 3-degree clockwise rotation for alignment
+                        frame = rotate_image(frame, -3)
                         
                         find_circles(frame)
                         
@@ -593,8 +594,8 @@ def main():
                     # Rotate image 90 degrees clockwise
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 
-                # Apply 3-degree fine rotation for alignment
-                frame = rotate_image(frame, 3)
+                # Apply 3-degree clockwise rotation for alignment
+                frame = rotate_image(frame, -3)
                 
                 find_circles(frame)
                 
