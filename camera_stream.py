@@ -19,10 +19,32 @@ import sys
 # Load environment variables from .env file
 load_dotenv()
 
+# Import detection functions from read_meter if detection overlay enabled
+STREAM_SHOW_DETECTION = os.getenv('STREAM_SHOW_DETECTION', 'false').lower() == 'true'
+if STREAM_SHOW_DETECTION:
+    try:
+        from read_meter import (
+            parse_manual_circles, select_best_circles, find_needle, 
+            read_value, rotate_image, _resize_for_hough,
+            USE_MANUAL_CIRCLES, MANUAL_CIRCLES_STR, DIALS_COUNT,
+            HOUGH_DP, HOUGH_PARAM1, HOUGH_PARAM2, RADIUS_MIN_FRAC, RADIUS_MAX_FRAC,
+            HOUGH_TARGET_WIDTH
+        )
+        print("Detection overlay enabled for camera stream")
+    except ImportError as e:
+        print(f"Warning: Could not import detection functions: {e}")
+        STREAM_SHOW_DETECTION = False
+
 app = Flask(__name__)
 
 # Fine rotation adjustment (in degrees, negative = clockwise) - loaded from .env
 FINE_ROTATION_ANGLE = int(os.getenv('FINE_ROTATION_ANGLE', '-4'))
+
+# Colors for detection overlay
+COLOR_GREEN = (0, 255, 0)
+COLOR_MAGENTA = (255, 0, 255)
+COLOR_ORANGE = (0, 128, 255)
+COLOR_BLUE = (255, 0, 0)
 
 # Global camera instance
 camera = None
@@ -37,6 +59,92 @@ def get_camera():
         camera = WaterMeterCamera()
         camera.initialize()
     return camera
+
+def apply_detection_overlay(frame):
+    """Apply circle and needle detection overlay to frame."""
+    if not STREAM_SHOW_DETECTION:
+        return frame
+    
+    try:
+        output = frame.copy()
+        
+        # Check if using manual circles
+        if USE_MANUAL_CIRCLES:
+            circles = parse_manual_circles(MANUAL_CIRCLES_STR)
+            if len(circles) > 0:
+                circles = sorted(circles, key=lambda c: c[0])
+        else:
+            # Dynamic circle detection
+            hough_frame, scale = _resize_for_hough(frame)
+            gray = cv2.cvtColor(hough_frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 1.5)
+            
+            mind = min(gray.shape[0], gray.shape[1])
+            min_radius = max(10, int(mind * RADIUS_MIN_FRAC))
+            max_radius = max(min_radius + 1, int(mind * RADIUS_MAX_FRAC))
+            
+            circles_raw = cv2.HoughCircles(
+                gray, cv2.HOUGH_GRADIENT, dp=HOUGH_DP,
+                minDist=max(10, min_radius),
+                param1=HOUGH_PARAM1, param2=HOUGH_PARAM2,
+                minRadius=min_radius, maxRadius=max_radius
+            )
+            
+            if circles_raw is None:
+                cv2.putText(output, "No circles detected", (20, 40),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                return output
+            
+            selected = select_best_circles(circles_raw, gray, DIALS_COUNT)
+            circles = []
+            for (x, y, r) in selected:
+                if scale != 1.0:
+                    x = int(round(x / scale))
+                    y = int(round(y / scale))
+                    r = int(round(r / scale))
+                circles.append((x, y, r))
+            circles = sorted(circles, key=lambda c: c[0])
+        
+        if len(circles) != DIALS_COUNT:
+            cv2.putText(output, f"Found {len(circles)}/{DIALS_COUNT} dials",
+                       (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 165, 255), 2)
+            # Still draw what we found
+            for (x, y, r) in circles:
+                cv2.circle(output, (x, y), r, COLOR_ORANGE, 3)
+            return output
+        
+        # Draw circles and detect needles
+        values = []
+        readout_conventions = ["CW", "CW", "CW", "CW", "CW"]
+        
+        for i, ((x, y, r), convention) in enumerate(zip(circles, readout_conventions)):
+            value, tip = find_needle(output, x, y, r)
+            actual_value = read_value(value, convention)
+            values.append(actual_value)
+            
+            # Draw circle
+            cv2.circle(output, (x, y), r, COLOR_GREEN, 3)
+            # Draw needle line
+            cv2.line(output, (x, y), tip, COLOR_MAGENTA, thickness=2)
+            # Draw value
+            cv2.putText(output, f"{actual_value:.2f}", (x - 30, y + r + 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, COLOR_BLUE, 2)
+        
+        # Show final reading
+        if len(values) == DIALS_COUNT:
+            from read_meter import process_values
+            reading = process_values(values)
+            cv2.putText(output, f"Reading: {reading}", (20, 40),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, COLOR_BLUE, 3)
+        
+        return output
+        
+    except Exception as e:
+        print(f"Detection overlay error: {e}")
+        # Return frame with error message
+        cv2.putText(frame, f"Detection error", (20, 40),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        return frame
 
 def generate_frames():
     """Generator function that yields frames in MJPEG format."""
@@ -63,6 +171,10 @@ def generate_frames():
                                         flags=cv2.INTER_LINEAR, 
                                         borderMode=cv2.BORDER_CONSTANT,
                                         borderValue=(255, 255, 255))
+            
+            # Apply detection overlay if enabled
+            if STREAM_SHOW_DETECTION:
+                frame = apply_detection_overlay(frame)
             
             # Encode frame as JPEG
             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
