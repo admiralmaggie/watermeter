@@ -412,6 +412,54 @@ def find_circles(frame):
     if not HEADLESS:
         cv2.imshow("output", output)
 
+def select_best_exposure(frames):
+    """
+    Select the best exposed image from a bracketed set based on image quality metrics.
+    
+    Args:
+        frames: List of numpy arrays (BGR images)
+    
+    Returns:
+        The frame with the best exposure (highest contrast/sharpness in mid-tones)
+    """
+    if len(frames) == 1:
+        return frames[0]
+    
+    best_score = -1
+    best_frame = frames[0]
+    
+    for i, frame in enumerate(frames):
+        # Convert to grayscale for analysis
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate sharpness using Laplacian variance
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        sharpness = laplacian.var()
+        
+        # Calculate contrast using standard deviation
+        contrast = gray.std()
+        
+        # Calculate histogram distribution (prefer balanced exposures)
+        hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+        hist = hist.flatten() / hist.sum()
+        
+        # Penalize over/underexposure (too many pixels at extremes)
+        underexposed = hist[:30].sum()
+        overexposed = hist[226:].sum()
+        exposure_penalty = (underexposed + overexposed) * 100
+        
+        # Combined score (higher is better)
+        score = (sharpness * 0.3 + contrast * 0.5) - exposure_penalty
+        
+        print(f"  Exposure {i+1}: sharpness={sharpness:.1f}, contrast={contrast:.1f}, "
+              f"under={underexposed:.3f}, over={overexposed:.3f}, score={score:.1f}")
+        
+        if score > best_score:
+            best_score = score
+            best_frame = frame
+    
+    return best_frame
+
 def read_value(value, convention):
     if convention == "CCW":
         result = 10. - value
@@ -434,6 +482,10 @@ def main():
                        help='Save captured/processed images')
     parser.add_argument('--interval', type=int, default=5,
                        help='Seconds between captures in continuous mode (default: 5)')
+    parser.add_argument('--bracket', action='store_true',
+                       help='Use exposure bracketing (capture multiple exposures and select best)')
+    parser.add_argument('--exposures', type=str, default='-1.0,0.0,1.0',
+                       help='Comma-separated EV values for bracketing (default: -1.0,0.0,1.0)')
     
     args = parser.parse_args()
     
@@ -455,14 +507,32 @@ def main():
                 try:
                     while True:
                         print(f"\n{time.strftime('%Y-%m-%d %H:%M:%S')} - Capturing image...")
-                        frame = camera.capture_image()
                         
-                        # Convert from RGB to BGR for OpenCV
-                        if frame.shape[2] == 3:
-                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                        
-                        # Rotate image 90 degrees clockwise
-                        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                        if args.bracket:
+                            # Parse exposure values
+                            exposures = [float(x.strip()) for x in args.exposures.split(',')]
+                            frames_raw = camera.capture_bracketed(exposures)
+                            
+                            # Convert all frames from RGB to BGR
+                            frames = []
+                            for frame in frames_raw:
+                                if frame.shape[2] == 3:
+                                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                                frames.append(frame)
+                            
+                            # Select best exposure
+                            print("Selecting best exposure...")
+                            frame = select_best_exposure(frames)
+                        else:
+                            frame = camera.capture_image()
+                            
+                            # Convert from RGB to BGR for OpenCV
+                            if frame.shape[2] == 3:
+                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                            
+                            # Rotate image 90 degrees clockwise
+                            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                         
                         find_circles(frame)
                         
@@ -476,14 +546,38 @@ def main():
             # Single capture mode
             print("Single capture mode...")
             with WaterMeterCamera() as camera:
-                frame = camera.capture_image()
-                
-                # Convert from RGB to BGR for OpenCV
-                if frame.shape[2] == 3:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                
-                # Rotate image 90 degrees clockwise
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                if args.bracket:
+                    # Parse exposure values
+                    exposures = [float(x.strip()) for x in args.exposures.split(',')]
+                    frames_raw = camera.capture_bracketed(exposures)
+                    
+                    # Convert all frames from RGB to BGR
+                    frames = []
+                    for frame in frames_raw:
+                        if frame.shape[2] == 3:
+                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                        frames.append(frame)
+                    
+                    # Select best exposure
+                    print("Selecting best exposure...")
+                    frame = select_best_exposure(frames)
+                    
+                    # Optionally save all bracketed frames
+                    if args.save:
+                        for i, f in enumerate(frames):
+                            filename = time.strftime(f"data/bracket-{i+1}-%Y%m%d-%H%M.jpg")
+                            cv2.imwrite(filename, f)
+                            print(f"Saved bracketed frame {i+1} to {filename}")
+                else:
+                    frame = camera.capture_image()
+                    
+                    # Convert from RGB to BGR for OpenCV
+                    if frame.shape[2] == 3:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                    
+                    # Rotate image 90 degrees clockwise
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 
                 find_circles(frame)
                 

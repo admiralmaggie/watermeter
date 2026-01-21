@@ -46,18 +46,67 @@ class WaterMeterCamera:
         except Exception as e:
             raise RuntimeError(f"Failed to initialize camera: {e}")
     
-    def capture_image(self):
-        """Capture an image from the camera and return as numpy array."""
+    def capture_image(self, exposure_compensation=0.0):
+        """
+        Capture an image from the camera and return as numpy array.
+        
+        Args:
+            exposure_compensation: Exposure compensation value in EV (-2.0 to +2.0)
+                                   0 = normal exposure
+                                   positive = brighter
+                                   negative = darker
+        """
         if not self.is_initialized:
             raise RuntimeError("Camera not initialized. Call initialize() first.")
         
         try:
-            # Capture image as numpy array (BGR format compatible with OpenCV)
+            # Set exposure compensation if specified
+            if exposure_compensation != 0.0:
+                self.camera.set_controls({"ExposureValue": exposure_compensation})
+                time.sleep(0.5)  # Allow exposure to adjust
+            
+            # Trigger autofocus cycle before capture
             self.camera.autofocus_cycle()
+            time.sleep(0.3)  # Wait for focus to settle
+            
+            # Capture image as numpy array
             frame = self.camera.capture_array()
+            
+            # Reset exposure compensation to normal
+            if exposure_compensation != 0.0:
+                self.camera.set_controls({"ExposureValue": 0.0})
+            
             return frame
         except Exception as e:
             raise RuntimeError(f"Failed to capture image: {e}")
+    
+    def capture_bracketed(self, exposures=[-1.0, 0.0, 1.0]):
+        """
+        Capture multiple images at different exposure levels (bracketing).
+        
+        Args:
+            exposures: List of exposure compensation values in EV
+                      Default: [-1.0, 0.0, 1.0] (underexposed, normal, overexposed)
+        
+        Returns:
+            List of numpy arrays, one for each exposure level
+        """
+        if not self.is_initialized:
+            raise RuntimeError("Camera not initialized. Call initialize() first.")
+        
+        frames = []
+        print(f"Capturing {len(exposures)} bracketed exposures: {exposures}")
+        
+        for i, ev in enumerate(exposures):
+            try:
+                print(f"  Capture {i+1}/{len(exposures)} at EV {ev:+.1f}...")
+                frame = self.capture_image(exposure_compensation=ev)
+                frames.append(frame)
+            except Exception as e:
+                print(f"  Warning: Failed to capture at EV {ev}: {e}")
+                continue
+        
+        return frames
     
     def close(self):
         """Close the camera and release resources."""
