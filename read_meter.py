@@ -11,15 +11,6 @@ from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
 # Load environment variables from .env file
 load_dotenv()
 
-# Try to import pytesseract for OCR (optional)
-try:
-    import pytesseract
-    PYTESSERACT_AVAILABLE = True
-except ImportError:
-    PYTESSERACT_AVAILABLE = False
-    print("WARNING: pytesseract not available. OCR feature disabled.")
-    print("         Install with: pip install pytesseract")
-
 # Detect if we're running in headless mode (no display available)
 HEADLESS = os.environ.get('DISPLAY', '') == '' or os.environ.get('HEADLESS', '0') == '1'
 
@@ -84,29 +75,6 @@ MOTION_ZONE2_Y = int(os.getenv('MOTION_ZONE2_Y', '400'))
 MOTION_ZONE2_R = int(os.getenv('MOTION_ZONE2_R', '100'))
 MOTION_THRESHOLD = float(os.getenv('MOTION_THRESHOLD', '2.0'))
 MOTION_FRAME_SKIP = int(os.getenv('MOTION_FRAME_SKIP', '3'))
-
-# OCR settings (loaded from .env)
-OCR_ENABLED = os.getenv('OCR_ENABLED', 'false').lower() == 'true'
-OCR_X = int(os.getenv('OCR_X', '100'))
-OCR_Y = int(os.getenv('OCR_Y', '100'))
-OCR_WIDTH = int(os.getenv('OCR_WIDTH', '400'))
-OCR_HEIGHT = int(os.getenv('OCR_HEIGHT', '100'))
-OCR_MODE = os.getenv('OCR_MODE', 'mechanical').lower()
-OCR_CONTRAST = float(os.getenv('OCR_CONTRAST', '2.0'))
-OCR_THRESHOLD = int(os.getenv('OCR_THRESHOLD', '0'))
-OCR_WHITELIST = os.getenv('OCR_WHITELIST', '0123456789')
-
-# Mechanical counter OCR settings
-OCR_CANNY_THRESHOLD1 = int(os.getenv('OCR_CANNY_THRESHOLD1', '200'))
-OCR_CANNY_THRESHOLD2 = int(os.getenv('OCR_CANNY_THRESHOLD2', '250'))
-OCR_DIGIT_MIN_WIDTH = int(os.getenv('OCR_DIGIT_MIN_WIDTH', '10'))
-OCR_DIGIT_MIN_HEIGHT = int(os.getenv('OCR_DIGIT_MIN_HEIGHT', '10'))
-OCR_DIGIT_MIN_AREA = int(os.getenv('OCR_DIGIT_MIN_AREA', '50'))
-OCR_DEBUG = os.getenv('OCR_DEBUG', 'true').lower() == 'true'
-
-# Colors
-COLOR_CYAN = (255, 255, 0)
-COLOR_YELLOW = (0, 255, 255)
 
 
 class MotionDetector:
@@ -250,288 +218,6 @@ class MotionDetector:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, color2, 2)
         
         return frame
-
-
-def read_ocr_digits(frame, x, y, w, h, contrast=2.0, threshold=0, whitelist='0123456789'):
-    """
-    Read digits from a rectangular region using OCR.
-    
-    Args:
-        frame: BGR image
-        x, y, w, h: Rectangle coordinates (x, y, width, height)
-        contrast: Contrast enhancement factor
-        threshold: Binarization threshold (0 for automatic Otsu)
-        whitelist: Characters to recognize
-        
-    Returns:
-        Tuple of (text, confidence, debug_image)
-    """
-    if not PYTESSERACT_AVAILABLE:
-        return None, 0, None
-    
-    # Extract ROI
-    roi = frame[y:y+h, x:x+w].copy()
-    
-    if roi.size == 0:
-        return None, 0, None
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    
-    # Enhance contrast
-    if contrast != 1.0:
-        gray = cv2.convertScaleAbs(gray, alpha=contrast, beta=0)
-    
-    # Apply binarization
-    if threshold == 0:
-        # Automatic Otsu thresholding
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    else:
-        _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
-    
-    # Denoise
-    binary = cv2.medianBlur(binary, 3)
-    
-    # Configure tesseract
-    config = '--psm 7 --oem 3'  # PSM 7 = single line of text
-    if whitelist:
-        config += f' -c tessedit_char_whitelist={whitelist}'
-    
-    # Run OCR
-    try:
-        data = pytesseract.image_to_data(binary, config=config, output_type=pytesseract.Output.DICT)
-        
-        # Extract text and confidence
-        text = ''
-        confidences = []
-        for i, conf in enumerate(data['conf']):
-            if conf > 0:  # Valid detection
-                text += data['text'][i]
-                confidences.append(conf)
-        
-        avg_confidence = np.mean(confidences) if confidences else 0
-        
-        # Create debug image
-        debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
-        cv2.putText(debug, f"OCR: {text} ({avg_confidence:.1f}%)", 
-                   (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_GREEN, 1)
-        
-        return text, avg_confidence, debug
-    except Exception as e:
-        print(f"OCR Error: {e}")
-        return None, 0, None
-
-
-def detect_digit_windows(roi):
-    """
-    Detect individual digit compartments in a mechanical counter using contour detection.
-    
-    Args:
-        roi: Grayscale or BGR image of the counter region
-        
-    Returns:
-        List of (x, y, w, h) tuples for each digit window, sorted left to right
-    """
-    # Convert to grayscale if needed
-    if len(roi.shape) == 3:
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-    else:
-        gray = roi.copy()
-    
-    # Canny edge detection
-    edges = cv2.Canny(gray, OCR_CANNY_THRESHOLD1, OCR_CANNY_THRESHOLD2, apertureSize=3, L2gradient=True)
-    
-    if OCR_DEBUG:
-        cv2.imwrite('data/_debug_ocr_edges.png', edges)
-        print(f"  Canny edges saved to data/_debug_ocr_edges.png")
-    
-    # Find contours
-    contours, _ = cv2.findContours(edges.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    print(f"  Found {len(contours)} total contours")
-    
-    # Filter contours by area and dimensions
-    contours_dict = dict()
-    for cont in contours:
-        x, y, w, h = cv2.boundingRect(cont)
-        area = cv2.contourArea(cont)
-        
-        # Filter by minimum dimensions and area
-        if (area > OCR_DIGIT_MIN_AREA and 
-            w > OCR_DIGIT_MIN_WIDTH and 
-            h > OCR_DIGIT_MIN_HEIGHT):
-            contours_dict[(x, y, w, h)] = cont
-    
-    print(f"  Found {len(contours_dict)} candidate digit windows")
-    
-    # Sort boxes by X coordinate (left to right)
-    boxes = sorted(contours_dict.keys(), key=lambda box: box[0])
-    
-    # Merge horizontally overlapping boxes
-    def is_overlapping_horizontally(box1, box2):
-        x1, _, w1, _ = box1
-        x2, _, _, _ = box2
-        if x1 > x2:
-            return is_overlapping_horizontally(box2, box1)
-        return (x2 - x1) < w1
-    
-    def merge_boxes(box1, box2):
-        x1, y1, w1, h1 = box1
-        x2, y2, w2, h2 = box2
-        x = min(x1, x2)
-        w = max(x1 + w1, x2 + w2) - x
-        y = min(y1, y2)
-        h = max(y1 + h1, y2 + h2) - y
-        return (x, y, w, h)
-    
-    merged_boxes = []
-    for box in boxes:
-        if not merged_boxes:
-            merged_boxes.append(box)
-        else:
-            if is_overlapping_horizontally(merged_boxes[-1], box):
-                last_box = merged_boxes.pop()
-                merged_box = merge_boxes(box, last_box)
-                merged_boxes.append(merged_box)
-            else:
-                merged_boxes.append(box)
-    
-    print(f"  After merging: {len(merged_boxes)} digit windows")
-    
-    return merged_boxes
-
-
-def read_ocr_digits_mechanical(frame, x, y, w, h):
-    """
-    Read digits from a mechanical counter using contour detection and per-digit OCR.
-    
-    Args:
-        frame: BGR image
-        x, y, w, h: Rectangle coordinates for the counter region
-        
-    Returns:
-        Tuple of (text, confidence, debug_image)
-    """
-    if not PYTESSERACT_AVAILABLE:
-        return None, 0, None
-    
-    # Extract ROI
-    roi = frame[y:y+h, x:x+w].copy()
-    
-    if roi.size == 0:
-        return None, 0, None
-    
-    print(f"  OCR Mechanical mode: Processing region ({x},{y},{w},{h})")
-    
-    # Save the raw ROI for debugging
-    if OCR_DEBUG:
-        cv2.imwrite('data/_debug_ocr_roi.png', roi)
-        print(f"  Raw OCR region saved to data/_debug_ocr_roi.png")
-    
-    # Detect individual digit windows
-    digit_boxes = detect_digit_windows(roi)
-    
-    if len(digit_boxes) == 0:
-        print("  No digit windows detected")
-        return None, 0, None
-    
-    # Create debug visualization
-    debug_img = roi.copy()
-    
-    # Process each digit
-    digits = []
-    confidences = []
-    
-    for i, box in enumerate(digit_boxes):
-        dx, dy, dw, dh = box
-        
-        # Draw bounding box on debug image
-        cv2.rectangle(debug_img, (dx, dy), (dx + dw, dy + dh), COLOR_GREEN, 2)
-        cv2.putText(debug_img, str(i), (dx, dy - 5), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_CYAN, 1)
-        
-        # Extract digit ROI
-        digit_roi = roi[dy:dy+dh, dx:dx+dw].copy()
-        
-        if digit_roi.size == 0:
-            continue
-        
-        # Convert to grayscale
-        digit_gray = cv2.cvtColor(digit_roi, cv2.COLOR_BGR2GRAY) if len(digit_roi.shape) == 3 else digit_roi
-        
-        # Apply contrast enhancement
-        digit_gray = cv2.convertScaleAbs(digit_gray, alpha=OCR_CONTRAST, beta=0)
-        
-        # Apply binarization
-        if OCR_THRESHOLD == 0:
-            _, digit_binary = cv2.threshold(digit_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        else:
-            _, digit_binary = cv2.threshold(digit_gray, OCR_THRESHOLD, 255, cv2.THRESH_BINARY)
-        
-        # Denoise
-        digit_binary = cv2.medianBlur(digit_binary, 3)
-        
-        # Resize to better size for OCR (tesseract works better with ~30-40 pixel height)
-        target_height = 40
-        scale = target_height / dh
-        new_width = int(dw * scale)
-        digit_resized = cv2.resize(digit_binary, (new_width, target_height), interpolation=cv2.INTER_CUBIC)
-        
-        # Save debug image for this digit
-        if OCR_DEBUG:
-            cv2.imwrite(f'data/_debug_ocr_digit_{i}.png', digit_resized)
-        
-        # Configure tesseract for single character recognition
-        config = '--psm 10 --oem 3'  # PSM 10 = single character
-        if OCR_WHITELIST:
-            config += f' -c tessedit_char_whitelist={OCR_WHITELIST}'
-        
-        # Run OCR
-        try:
-            text = pytesseract.image_to_string(digit_resized, config=config).strip()
-            
-            # Get confidence
-            data = pytesseract.image_to_data(digit_resized, config=config, output_type=pytesseract.Output.DICT)
-            conf_vals = [c for c in data['conf'] if c > 0]
-            digit_conf = np.mean(conf_vals) if conf_vals else 0
-            
-            # Clean up result (should be single digit)
-            text = ''.join(c for c in text if c.isdigit())
-            
-            if text and len(text) == 1:
-                digits.append(text)
-                confidences.append(digit_conf)
-                print(f"    Digit {i}: '{text}' (confidence: {digit_conf:.1f}%)")
-                
-                # Add text to debug image
-                cv2.putText(debug_img, text, (dx + dw//3, dy + dh//2), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, COLOR_YELLOW, 2)
-            else:
-                print(f"    Digit {i}: No valid digit detected (got: '{text}')")
-                digits.append('?')
-                confidences.append(0)
-                
-        except Exception as e:
-            print(f"    Digit {i}: OCR error - {e}")
-            digits.append('?')
-            confidences.append(0)
-    
-    # Combine results
-    final_text = ''.join(digits)
-    avg_confidence = np.mean(confidences) if confidences else 0
-    
-    # Add final text to debug image
-    cv2.putText(debug_img, f"Result: {final_text}", 
-               (10, debug_img.shape[0] - 10),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_GREEN, 2)
-    cv2.putText(debug_img, f"Confidence: {avg_confidence:.1f}%", 
-               (10, debug_img.shape[0] - 35),
-               cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_GREEN, 1)
-    
-    if OCR_DEBUG:
-        cv2.imwrite('data/_debug_ocr_result.png', debug_img)
-        print(f"  OCR debug image saved to data/_debug_ocr_result.png")
-    
-    return final_text, avg_confidence, debug_img
 
 
 def parse_manual_circles(circles_str):
@@ -818,7 +504,7 @@ def rotate_image(image, angle):
                               borderValue=(255, 255, 255))
     return rotated
 
-def find_circles(frame, motion_detector=None, enable_ocr=False):
+def find_circles(frame, motion_detector=None):
     if frame is None:
         print(f"DEBUG: Error: Could not read image from {IMAGE_PATH}.")
         return
@@ -835,39 +521,6 @@ def find_circles(frame, motion_detector=None, enable_ocr=False):
     if motion_detector is not None:
         motion1, motion2, percent1, percent2 = motion_detector.process_frame(frame)
         output = motion_detector.draw_zones(output)
-    
-    # Process OCR if enabled
-    if enable_ocr and PYTESSERACT_AVAILABLE:
-        print(f"OCR Mode: {OCR_MODE}")
-        
-        # Choose OCR method based on mode
-        if OCR_MODE == 'mechanical':
-            ocr_text, ocr_conf, ocr_debug = read_ocr_digits_mechanical(
-                frame, OCR_X, OCR_Y, OCR_WIDTH, OCR_HEIGHT
-            )
-        else:  # simple mode
-            ocr_text, ocr_conf, ocr_debug = read_ocr_digits(
-                frame, OCR_X, OCR_Y, OCR_WIDTH, OCR_HEIGHT,
-                OCR_CONTRAST, OCR_THRESHOLD, OCR_WHITELIST
-            )
-        
-        if ocr_text:
-            print(f"OCR Reading: {ocr_text} (confidence: {ocr_conf:.1f}%)")
-            # Draw OCR region and result on output
-            cv2.rectangle(output, (OCR_X, OCR_Y), 
-                         (OCR_X + OCR_WIDTH, OCR_Y + OCR_HEIGHT), 
-                         COLOR_CYAN, 2)
-            cv2.putText(output, f"OCR: {ocr_text}", 
-                       (OCR_X, OCR_Y - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 1, COLOR_CYAN, 2)
-            
-            if ocr_debug is not None and not HEADLESS:
-                cv2.imshow("OCR Debug", ocr_debug)
-        else:
-            print("OCR: No text detected")
-            cv2.rectangle(output, (OCR_X, OCR_Y), 
-                         (OCR_X + OCR_WIDTH, OCR_Y + OCR_HEIGHT), 
-                         COLOR_RED, 2)
 
     # Check if using manual circles
     if USE_MANUAL_CIRCLES:
@@ -1067,8 +720,6 @@ def main():
                        help='Comma-separated EV values for bracketing (default: -1.0,0.0,1.0)')
     parser.add_argument('--motion', action='store_true',
                        help='Enable motion detection (uses zones from .env)')
-    parser.add_argument('--ocr', action='store_true',
-                       help='Enable OCR for reading digital display (uses region from .env)')
     
     args = parser.parse_args()
     
@@ -1089,14 +740,6 @@ def main():
             zone1 = (MOTION_ZONE1_X, MOTION_ZONE1_Y, MOTION_ZONE1_R)
             zone2 = (MOTION_ZONE2_X, MOTION_ZONE2_Y, MOTION_ZONE2_R)
             motion_det = MotionDetector(zone1, zone2, MOTION_THRESHOLD, MOTION_FRAME_SKIP)
-        
-        # Check OCR availability
-        enable_ocr = args.ocr
-        if enable_ocr and not PYTESSERACT_AVAILABLE:
-            print("WARNING: OCR requested but pytesseract not available.")
-            enable_ocr = False
-        elif enable_ocr:
-            print(f"OCR enabled: region=({OCR_X},{OCR_Y},{OCR_WIDTH},{OCR_HEIGHT})")
         
         if args.continuous:
             # Continuous capture mode
@@ -1136,7 +779,7 @@ def main():
                         if FINE_ROTATION_ANGLE != 0:
                             frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                         
-                        find_circles(frame, motion_det, enable_ocr)
+                        find_circles(frame, motion_det)
                         
                         print(f"Waiting {args.interval} seconds...")
                         time.sleep(args.interval)
@@ -1185,7 +828,7 @@ def main():
                 if FINE_ROTATION_ANGLE != 0:
                     frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                 
-                find_circles(frame, motion_det, enable_ocr)
+                find_circles(frame, motion_det)
                 
                 if not HEADLESS:
                     print("DEBUG: Processing complete. Press any key to exit...")
@@ -1203,8 +846,8 @@ def main():
             print(f"ERROR: Could not read image from {image_path}")
             sys.exit(1)
         
-        # File mode doesn't support motion or OCR command flags
-        find_circles(frame, None, False)
+        # File mode doesn't support motion detection
+        find_circles(frame, None)
         
         if not HEADLESS:
             print("DEBUG: Processing complete. Press any key to exit...")
