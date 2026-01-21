@@ -44,6 +44,9 @@ def generate_frames():
             if frame.shape[2] == 3 and len(frame.shape) == 3:
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             
+            # Rotate image 90 degrees clockwise
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            
             # Encode frame as JPEG
             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             

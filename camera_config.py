@@ -23,18 +23,26 @@ class WaterMeterCamera:
         
         try:
             self.camera = Picamera2()
-            # Configure camera for high-quality still images
+            # Configure camera for maximum resolution still images
             config = self.camera.create_still_configuration(
-                main={"size": (1920, 1080)},  # Adjust resolution as needed
+                main={"size": (4608, 2592)},  # Maximum resolution for Pi Camera v3
                 lores={"size": (640, 480)},
                 display="lores"
             )
             self.camera.configure(config)
+            
+            # Set autofocus mode if supported (Pi Camera v3)
+            try:
+                self.camera.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
+                print("Autofocus enabled (continuous mode)")
+            except Exception as af_error:
+                print(f"Autofocus not available or failed: {af_error}")
+            
             self.camera.start()
-            # Allow camera to warm up and adjust exposure
-            time.sleep(2)
+            # Allow camera to warm up, adjust exposure, and autofocus to settle
+            time.sleep(3)
             self.is_initialized = True
-            print("Camera initialized successfully")
+            print("Camera initialized successfully at 4608x2592 resolution")
         except Exception as e:
             raise RuntimeError(f"Failed to initialize camera: {e}")
     

@@ -461,6 +461,9 @@ def main():
                         if frame.shape[2] == 3:
                             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                         
+                        # Rotate image 90 degrees clockwise
+                        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                        
                         find_circles(frame)
                         
                         print(f"Waiting {args.interval} seconds...")
@@ -478,6 +481,9 @@ def main():
                 # Convert from RGB to BGR for OpenCV
                 if frame.shape[2] == 3:
                     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                
+                # Rotate image 90 degrees clockwise
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 
                 find_circles(frame)
                 
