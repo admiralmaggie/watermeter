@@ -11,6 +11,15 @@ from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
 # Load environment variables from .env file
 load_dotenv()
 
+# Try to import pytesseract for OCR (optional)
+try:
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
+    print("WARNING: pytesseract not available. OCR feature disabled.")
+    print("         Install with: pip install pytesseract")
+
 # Detect if we're running in headless mode (no display available)
 HEADLESS = os.environ.get('DISPLAY', '') == '' or os.environ.get('HEADLESS', '0') == '1'
 
@@ -65,6 +74,243 @@ RED_HUE_UPPER1 = int(os.getenv('RED_HUE_UPPER1', '10'))
 RED_HUE_LOWER2 = int(os.getenv('RED_HUE_LOWER2', '170'))
 RED_SAT_LOWER2 = int(os.getenv('RED_SAT_LOWER2', '80'))
 RED_VAL_LOWER2 = int(os.getenv('RED_VAL_LOWER2', '60'))
+
+# Motion detection settings (loaded from .env)
+MOTION_ZONE1_X = int(os.getenv('MOTION_ZONE1_X', '200'))
+MOTION_ZONE1_Y = int(os.getenv('MOTION_ZONE1_Y', '400'))
+MOTION_ZONE1_R = int(os.getenv('MOTION_ZONE1_R', '100'))
+MOTION_ZONE2_X = int(os.getenv('MOTION_ZONE2_X', '600'))
+MOTION_ZONE2_Y = int(os.getenv('MOTION_ZONE2_Y', '400'))
+MOTION_ZONE2_R = int(os.getenv('MOTION_ZONE2_R', '100'))
+MOTION_THRESHOLD = float(os.getenv('MOTION_THRESHOLD', '2.0'))
+MOTION_FRAME_SKIP = int(os.getenv('MOTION_FRAME_SKIP', '3'))
+
+# OCR settings (loaded from .env)
+OCR_ENABLED = os.getenv('OCR_ENABLED', 'false').lower() == 'true'
+OCR_X = int(os.getenv('OCR_X', '100'))
+OCR_Y = int(os.getenv('OCR_Y', '100'))
+OCR_WIDTH = int(os.getenv('OCR_WIDTH', '400'))
+OCR_HEIGHT = int(os.getenv('OCR_HEIGHT', '100'))
+OCR_CONTRAST = float(os.getenv('OCR_CONTRAST', '2.0'))
+OCR_THRESHOLD = int(os.getenv('OCR_THRESHOLD', '0'))
+OCR_WHITELIST = os.getenv('OCR_WHITELIST', '0123456789')
+
+# Colors
+COLOR_CYAN = (255, 255, 0)
+COLOR_YELLOW = (0, 255, 255)
+
+
+class MotionDetector:
+    """Detects motion in two circular zones of the video stream."""
+    
+    def __init__(self, zone1, zone2, threshold=2.0, frame_skip=3):
+        """
+        Initialize motion detector with two zones.
+        
+        Args:
+            zone1: Tuple of (x, y, radius) for first detection zone
+            zone2: Tuple of (x, y, radius) for second detection zone
+            threshold: Minimum percentage of pixels that must change (0-100)
+            frame_skip: Check motion every N frames for efficiency
+        """
+        self.zone1 = zone1
+        self.zone2 = zone2
+        self.threshold = threshold
+        self.frame_skip = frame_skip
+        
+        self.prev_frame = None
+        self.frame_count = 0
+        self.motion_detected_zone1 = False
+        self.motion_detected_zone2 = False
+        self.last_motion_time_zone1 = None
+        self.last_motion_time_zone2 = None
+        
+        print(f"Motion detector initialized:")
+        print(f"  Zone 1: center=({zone1[0]}, {zone1[1]}), radius={zone1[2]}")
+        print(f"  Zone 2: center=({zone2[0]}, {zone2[1]}), radius={zone2[2]}")
+        print(f"  Threshold: {threshold}%, Frame skip: {frame_skip}")
+    
+    def create_circular_mask(self, frame_shape, center, radius):
+        """Create a circular mask for a specific zone."""
+        height, width = frame_shape[:2]
+        y, x = np.ogrid[:height, :width]
+        cx, cy = center
+        
+        # Create circular mask
+        mask = ((x - cx)**2 + (y - cy)**2 <= radius**2).astype(np.uint8) * 255
+        return mask
+    
+    def detect_motion_in_zone(self, current_gray, prev_gray, mask):
+        """
+        Detect motion within a masked zone.
+        
+        Returns:
+            Tuple of (motion_detected, change_percentage)
+        """
+        # Calculate absolute difference
+        frame_diff = cv2.absdiff(current_gray, prev_gray)
+        
+        # Apply threshold to get binary image
+        _, thresh = cv2.threshold(frame_diff, 25, 255, cv2.THRESH_BINARY)
+        
+        # Apply mask to only consider the zone
+        thresh_masked = cv2.bitwise_and(thresh, thresh, mask=mask)
+        
+        # Count non-zero pixels in the zone
+        changed_pixels = cv2.countNonZero(thresh_masked)
+        total_pixels = cv2.countNonZero(mask)
+        
+        if total_pixels == 0:
+            return False, 0.0
+        
+        # Calculate percentage of changed pixels
+        change_percentage = (changed_pixels / total_pixels) * 100
+        
+        # Motion detected if change exceeds threshold
+        motion_detected = change_percentage >= self.threshold
+        
+        return motion_detected, change_percentage
+    
+    def process_frame(self, frame):
+        """
+        Process a frame and detect motion in both zones.
+        
+        Args:
+            frame: BGR image frame
+            
+        Returns:
+            Tuple of (zone1_motion, zone2_motion, zone1_percent, zone2_percent)
+        """
+        self.frame_count += 1
+        
+        # Skip frames for efficiency
+        if self.frame_count % self.frame_skip != 0:
+            return (self.motion_detected_zone1, self.motion_detected_zone2, 0.0, 0.0)
+        
+        # Convert to grayscale and blur to reduce noise
+        current_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        current_gray = cv2.GaussianBlur(current_gray, (21, 21), 0)
+        
+        # Initialize on first frame
+        if self.prev_frame is None:
+            self.prev_frame = current_gray
+            return (False, False, 0.0, 0.0)
+        
+        # Create masks for both zones
+        mask1 = self.create_circular_mask(frame.shape, 
+                                          (self.zone1[0], self.zone1[1]), 
+                                          self.zone1[2])
+        mask2 = self.create_circular_mask(frame.shape, 
+                                          (self.zone2[0], self.zone2[1]), 
+                                          self.zone2[2])
+        
+        # Detect motion in both zones
+        motion1, percent1 = self.detect_motion_in_zone(current_gray, self.prev_frame, mask1)
+        motion2, percent2 = self.detect_motion_in_zone(current_gray, self.prev_frame, mask2)
+        
+        # Update state
+        self.motion_detected_zone1 = motion1
+        self.motion_detected_zone2 = motion2
+        
+        if motion1:
+            self.last_motion_time_zone1 = time.time()
+            print(f"  Motion detected in Zone 1 ({percent1:.2f}% change)")
+        if motion2:
+            self.last_motion_time_zone2 = time.time()
+            print(f"  Motion detected in Zone 2 ({percent2:.2f}% change)")
+        
+        # Update previous frame
+        self.prev_frame = current_gray
+        
+        return (motion1, motion2, percent1, percent2)
+    
+    def draw_zones(self, frame):
+        """Draw motion detection zones and status on frame."""
+        # Draw zone 1
+        color1 = COLOR_RED if self.motion_detected_zone1 else COLOR_GREEN
+        cv2.circle(frame, (self.zone1[0], self.zone1[1]), self.zone1[2], color1, 2)
+        cv2.putText(frame, "Zone 1", 
+                   (self.zone1[0] - 30, self.zone1[1] - self.zone1[2] - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color1, 2)
+        
+        # Draw zone 2
+        color2 = COLOR_RED if self.motion_detected_zone2 else COLOR_GREEN
+        cv2.circle(frame, (self.zone2[0], self.zone2[1]), self.zone2[2], color2, 2)
+        cv2.putText(frame, "Zone 2", 
+                   (self.zone2[0] - 30, self.zone2[1] - self.zone2[2] - 10),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, color2, 2)
+        
+        return frame
+
+
+def read_ocr_digits(frame, x, y, w, h, contrast=2.0, threshold=0, whitelist='0123456789'):
+    """
+    Read digits from a rectangular region using OCR.
+    
+    Args:
+        frame: BGR image
+        x, y, w, h: Rectangle coordinates (x, y, width, height)
+        contrast: Contrast enhancement factor
+        threshold: Binarization threshold (0 for automatic Otsu)
+        whitelist: Characters to recognize
+        
+    Returns:
+        Tuple of (text, confidence, debug_image)
+    """
+    if not PYTESSERACT_AVAILABLE:
+        return None, 0, None
+    
+    # Extract ROI
+    roi = frame[y:y+h, x:x+w].copy()
+    
+    if roi.size == 0:
+        return None, 0, None
+    
+    # Convert to grayscale
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    
+    # Enhance contrast
+    if contrast != 1.0:
+        gray = cv2.convertScaleAbs(gray, alpha=contrast, beta=0)
+    
+    # Apply binarization
+    if threshold == 0:
+        # Automatic Otsu thresholding
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    else:
+        _, binary = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
+    
+    # Denoise
+    binary = cv2.medianBlur(binary, 3)
+    
+    # Configure tesseract
+    config = '--psm 7 --oem 3'  # PSM 7 = single line of text
+    if whitelist:
+        config += f' -c tessedit_char_whitelist={whitelist}'
+    
+    # Run OCR
+    try:
+        data = pytesseract.image_to_data(binary, config=config, output_type=pytesseract.Output.DICT)
+        
+        # Extract text and confidence
+        text = ''
+        confidences = []
+        for i, conf in enumerate(data['conf']):
+            if conf > 0:  # Valid detection
+                text += data['text'][i]
+                confidences.append(conf)
+        
+        avg_confidence = np.mean(confidences) if confidences else 0
+        
+        # Create debug image
+        debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+        cv2.putText(debug, f"OCR: {text} ({avg_confidence:.1f}%)", 
+                   (5, 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_GREEN, 1)
+        
+        return text, avg_confidence, debug
+    except Exception as e:
+        print(f"OCR Error: {e}")
+        return None, 0, None
 
 
 def parse_manual_circles(circles_str):
@@ -351,7 +597,7 @@ def rotate_image(image, angle):
                               borderValue=(255, 255, 255))
     return rotated
 
-def find_circles(frame):
+def find_circles(frame, motion_detector=None, enable_ocr=False):
     if frame is None:
         print(f"DEBUG: Error: Could not read image from {IMAGE_PATH}.")
         return
@@ -363,6 +609,36 @@ def find_circles(frame):
         cv2.imwrite(filename, frame)
 
     output = frame.copy()
+    
+    # Process motion detection if enabled
+    if motion_detector is not None:
+        motion1, motion2, percent1, percent2 = motion_detector.process_frame(frame)
+        output = motion_detector.draw_zones(output)
+    
+    # Process OCR if enabled
+    if enable_ocr and PYTESSERACT_AVAILABLE:
+        ocr_text, ocr_conf, ocr_debug = read_ocr_digits(
+            frame, OCR_X, OCR_Y, OCR_WIDTH, OCR_HEIGHT,
+            OCR_CONTRAST, OCR_THRESHOLD, OCR_WHITELIST
+        )
+        
+        if ocr_text:
+            print(f"OCR Reading: {ocr_text} (confidence: {ocr_conf:.1f}%)")
+            # Draw OCR region and result on output
+            cv2.rectangle(output, (OCR_X, OCR_Y), 
+                         (OCR_X + OCR_WIDTH, OCR_Y + OCR_HEIGHT), 
+                         COLOR_CYAN, 2)
+            cv2.putText(output, f"OCR: {ocr_text}", 
+                       (OCR_X, OCR_Y - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, COLOR_CYAN, 2)
+            
+            if ocr_debug is not None and not HEADLESS:
+                cv2.imshow("OCR Debug", ocr_debug)
+        else:
+            print("OCR: No text detected")
+            cv2.rectangle(output, (OCR_X, OCR_Y), 
+                         (OCR_X + OCR_WIDTH, OCR_Y + OCR_HEIGHT), 
+                         COLOR_RED, 2)
 
     # Check if using manual circles
     if USE_MANUAL_CIRCLES:
@@ -560,6 +836,10 @@ def main():
                        help='Use exposure bracketing (capture multiple exposures and select best)')
     parser.add_argument('--exposures', type=str, default='-1.0,0.0,1.0',
                        help='Comma-separated EV values for bracketing (default: -1.0,0.0,1.0)')
+    parser.add_argument('--motion', action='store_true',
+                       help='Enable motion detection (uses zones from .env)')
+    parser.add_argument('--ocr', action='store_true',
+                       help='Enable OCR for reading digital display (uses region from .env)')
     
     args = parser.parse_args()
     
@@ -573,6 +853,21 @@ def main():
             sys.exit(1)
         
         print("Starting camera mode...")
+        
+        # Initialize motion detector if requested
+        motion_det = None
+        if args.motion:
+            zone1 = (MOTION_ZONE1_X, MOTION_ZONE1_Y, MOTION_ZONE1_R)
+            zone2 = (MOTION_ZONE2_X, MOTION_ZONE2_Y, MOTION_ZONE2_R)
+            motion_det = MotionDetector(zone1, zone2, MOTION_THRESHOLD, MOTION_FRAME_SKIP)
+        
+        # Check OCR availability
+        enable_ocr = args.ocr
+        if enable_ocr and not PYTESSERACT_AVAILABLE:
+            print("WARNING: OCR requested but pytesseract not available.")
+            enable_ocr = False
+        elif enable_ocr:
+            print(f"OCR enabled: region=({OCR_X},{OCR_Y},{OCR_WIDTH},{OCR_HEIGHT})")
         
         if args.continuous:
             # Continuous capture mode
@@ -612,7 +907,7 @@ def main():
                         if FINE_ROTATION_ANGLE != 0:
                             frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                         
-                        find_circles(frame)
+                        find_circles(frame, motion_det, enable_ocr)
                         
                         print(f"Waiting {args.interval} seconds...")
                         time.sleep(args.interval)
@@ -661,7 +956,7 @@ def main():
                 if FINE_ROTATION_ANGLE != 0:
                     frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                 
-                find_circles(frame)
+                find_circles(frame, motion_det, enable_ocr)
                 
                 if not HEADLESS:
                     print("DEBUG: Processing complete. Press any key to exit...")
@@ -679,7 +974,8 @@ def main():
             print(f"ERROR: Could not read image from {image_path}")
             sys.exit(1)
         
-        find_circles(frame)
+        # File mode doesn't support motion or OCR command flags
+        find_circles(frame, None, False)
         
         if not HEADLESS:
             print("DEBUG: Processing complete. Press any key to exit...")

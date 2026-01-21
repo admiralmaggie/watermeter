@@ -11,6 +11,14 @@ Flask>=3.0.0
 # Environment variable management
 python-dotenv>=1.0.0
 
+# OCR support for reading digital displays (optional)
+# Requires tesseract-ocr to be installed on the system
+# Install on Raspberry Pi: sudo apt-get install tesseract-ocr
+# Install on Ubuntu/Debian: sudo apt-get install tesseract-ocr
+# Install on macOS: brew install tesseract
+# Install on Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
+pytesseract>=0.3.10
+
 # Raspberry Pi camera support (only works on Raspberry Pi hardware)
 # Install on Raspberry Pi with: sudo apt install -y python3-picamera2
 # Or: pip install picamera2
