@@ -27,6 +27,8 @@ IMAGE_PATH = sys.argv[1] if len(sys.argv) > 1 else 'test.jpeg'
 
 # Configuration from .env
 DIALS_COUNT = int(os.getenv('DIALS_COUNT', '3'))
+USE_MANUAL_CIRCLES = os.getenv('USE_MANUAL_CIRCLES', 'false').lower() == 'true'
+MANUAL_CIRCLES_STR = os.getenv('MANUAL_CIRCLES', '')
 SAVE_IMAGE = False
 fig, ax = plt.subplots(figsize=(6, 6))
 
@@ -63,6 +65,30 @@ RED_HUE_UPPER1 = int(os.getenv('RED_HUE_UPPER1', '10'))
 RED_HUE_LOWER2 = int(os.getenv('RED_HUE_LOWER2', '170'))
 RED_SAT_LOWER2 = int(os.getenv('RED_SAT_LOWER2', '80'))
 RED_VAL_LOWER2 = int(os.getenv('RED_VAL_LOWER2', '60'))
+
+
+def parse_manual_circles(circles_str):
+    """
+    Parse manual circle coordinates from string.
+    Format: x1,y1,r1;x2,y2,r2;x3,y3,r3
+    Returns: List of (x, y, r) tuples
+    """
+    if not circles_str or circles_str.strip() == '':
+        return []
+    
+    circles = []
+    try:
+        for circle_str in circles_str.split(';'):
+            parts = circle_str.strip().split(',')
+            if len(parts) == 3:
+                x = int(parts[0].strip())
+                y = int(parts[1].strip())
+                r = int(parts[2].strip())
+                circles.append((x, y, r))
+        return circles
+    except Exception as e:
+        print(f"ERROR: Failed to parse manual circles: {e}")
+        return []
 
 
 def _resize_for_hough(frame: np.ndarray, target_width: int = HOUGH_TARGET_WIDTH):
@@ -336,60 +362,74 @@ def find_circles(frame):
         filename = time.strftime("data/sample-%Y%m%d-%H%M.jpg")
         cv2.imwrite(filename, frame)
 
-    # NOTE:
-    # HoughCircles is very sensitive to contrast changes. Aggressively scaling the
-    # grayscale image (e.g. alpha=2.5, beta=-300) can create many false edges and
-    # cause HoughCircles to return hundreds of circles.
-    #
-    # We keep circle detection on a stable grayscale (+ optional blur), and do any
-    # color emphasis (e.g., RED needle isolation) inside find_needle().
-    print("DEBUG: Preparing image for circle detection...")
-    hough_frame, scale = _resize_for_hough(frame)
-    gray = cv2.cvtColor(hough_frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (5, 5), 1.5)
     output = frame.copy()
 
-    # Dynamic radius bounds based on image size (works across different resolutions)
-    mind = min(gray.shape[0], gray.shape[1])
-    min_radius = max(10, int(mind * RADIUS_MIN_FRAC))
-    max_radius = max(min_radius + 1, int(mind * RADIUS_MAX_FRAC))
+    # Check if using manual circles
+    if USE_MANUAL_CIRCLES:
+        print("DEBUG: Using manual circle coordinates from .env")
+        circles = parse_manual_circles(MANUAL_CIRCLES_STR)
+        
+        if len(circles) == 0:
+            print("ERROR: Manual circles enabled but no valid coordinates provided.")
+            print("      Set MANUAL_CIRCLES in .env file (format: x1,y1,r1;x2,y2,r2;x3,y3,r3)")
+            return
+        
+        if len(circles) != DIALS_COUNT:
+            print(f"WARNING: Found {len(circles)} manual circles but expected {DIALS_COUNT}")
+        
+        print(f"DEBUG: Loaded {len(circles)} manual circles: {circles}")
+        
+        # Sort by X so dials are left-to-right
+        circles = sorted(circles, key=lambda c: c[0])
+    else:
+        # Dynamic circle detection using Hough Transform
+        print("DEBUG: Detecting circles dynamically using HoughCircles...")
+        hough_frame, scale = _resize_for_hough(frame)
+        gray = cv2.cvtColor(hough_frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 1.5)
 
-    print(
-        "DEBUG: Searching for circles using HoughCircles... "
-        f"(scale={scale:.3f}, minR={min_radius}, maxR={max_radius}, param2={HOUGH_PARAM2})"
-    )
-    circles = cv2.HoughCircles(
-        gray,
-        cv2.HOUGH_GRADIENT,
-        dp=HOUGH_DP,
-        minDist=max(10, min_radius),
-        param1=HOUGH_PARAM1,
-        param2=HOUGH_PARAM2,
-        minRadius=min_radius,
-        maxRadius=max_radius,
-    )
+        # Dynamic radius bounds based on image size
+        mind = min(gray.shape[0], gray.shape[1])
+        min_radius = max(10, int(mind * RADIUS_MIN_FRAC))
+        max_radius = max(min_radius + 1, int(mind * RADIUS_MAX_FRAC))
+
+        print(
+            f"DEBUG: HoughCircles params: scale={scale:.3f}, minR={min_radius}, "
+            f"maxR={max_radius}, param2={HOUGH_PARAM2}"
+        )
+        
+        circles_raw = cv2.HoughCircles(
+            gray,
+            cv2.HOUGH_GRADIENT,
+            dp=HOUGH_DP,
+            minDist=max(10, min_radius),
+            param1=HOUGH_PARAM1,
+            param2=HOUGH_PARAM2,
+            minRadius=min_radius,
+            maxRadius=max_radius,
+        )
+
+        if circles_raw is None:
+            print("DEBUG: No circles found by HoughCircles.")
+            return
+
+        # Select the best dials even if Hough finds extras
+        selected = select_best_circles(circles_raw, gray, DIALS_COUNT)
+
+        # Map circle coords back to original resolution
+        circles = []
+        for (x, y, r) in selected:
+            if scale != 1.0:
+                x = int(round(x / scale))
+                y = int(round(y / scale))
+                r = int(round(r / scale))
+            circles.append((x, y, r))
+
+        # Sort by X so dials are left-to-right
+        circles = sorted(circles, key=lambda c: c[0])
 
     # TODO: move to config. In the provided images, all dials appear to be Clockwise (CW).
     readout_conventions = ["CW", "CW", "CW", "CW", "CW"]
-
-    if circles is None:
-        print("DEBUG: No circles found by HoughCircles.")
-        return
-
-    # Select the best dials even if Hough finds extras
-    selected = select_best_circles(circles, gray, DIALS_COUNT)
-
-    # Map circle coords back to original resolution
-    circles = []
-    for (x, y, r) in selected:
-        if scale != 1.0:
-            x = int(round(x / scale))
-            y = int(round(y / scale))
-            r = int(round(r / scale))
-        circles.append((x, y, r))
-
-    # Sort by X so dials are left-to-right
-    circles = sorted(circles, key=lambda c: c[0])
 
     # DEBUG: show selected circles
     if not HEADLESS:
