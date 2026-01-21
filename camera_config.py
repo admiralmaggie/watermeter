@@ -9,12 +9,25 @@ except ImportError:
     CAMERA_AVAILABLE = False
     print("WARNING: picamera2 not available. Camera features disabled.")
 
+# Hardware Crop Configuration (applied at sensor/ISP level before rotation)
+# Coordinates are in sensor space (4608x2592 landscape before 90° clockwise rotation)
+# Format: (x, y, width, height) where (x,y) is top-left corner
+CROP_ENABLED = False
+CROP_REGION = (0, 0, 4608, 2592)  # Full sensor by default
+
+# Example crop regions (uncomment to use):
+# Center 50%: CROP_REGION = (1152, 648, 2304, 1296)
+# Center 75%: CROP_REGION = (576, 324, 3456, 1944)
+
 class WaterMeterCamera:
     """Wrapper for Raspberry Pi camera operations."""
     
-    def __init__(self):
+    def __init__(self, crop_enabled=None, crop_region=None):
         self.camera = None
         self.is_initialized = False
+        # Use provided crop settings or fall back to module defaults
+        self.crop_enabled = crop_enabled if crop_enabled is not None else CROP_ENABLED
+        self.crop_region = crop_region if crop_region is not None else CROP_REGION
         
     def initialize(self):
         """Initialize the Raspberry Pi camera."""
@@ -23,13 +36,37 @@ class WaterMeterCamera:
         
         try:
             self.camera = Picamera2()
+            
+            # Determine output size based on crop settings
+            if self.crop_enabled:
+                # Use crop dimensions as output size
+                output_width = self.crop_region[2]
+                output_height = self.crop_region[3]
+                print(f"Hardware crop enabled: {self.crop_region}")
+                print(f"  Crop region: x={self.crop_region[0]}, y={self.crop_region[1]}, "
+                      f"w={output_width}, h={output_height}")
+            else:
+                # Use full sensor resolution
+                output_width = 4608
+                output_height = 2592
+                print("Hardware crop disabled - using full sensor")
+            
             # Configure camera for maximum resolution still images
             config = self.camera.create_still_configuration(
-                main={"size": (4608, 2592)},  # Maximum resolution for Pi Camera v3
+                main={"size": (output_width, output_height)},
                 lores={"size": (640, 480)},
                 display="lores"
             )
             self.camera.configure(config)
+            
+            # Apply hardware crop if enabled (BEFORE camera start)
+            if self.crop_enabled:
+                try:
+                    self.camera.set_controls({"ScalerCrop": self.crop_region})
+                    print("Hardware ScalerCrop applied successfully")
+                except Exception as crop_error:
+                    print(f"Warning: Failed to apply ScalerCrop: {crop_error}")
+                    print("  Continuing with full sensor...")
             
             # Set autofocus mode if supported (Pi Camera v3)
             try:
@@ -42,7 +79,10 @@ class WaterMeterCamera:
             # Allow camera to warm up, adjust exposure, and autofocus to settle
             time.sleep(3)
             self.is_initialized = True
-            print("Camera initialized successfully at 4608x2592 resolution")
+            
+            crop_status = f"with crop {self.crop_region}" if self.crop_enabled else "at full resolution"
+            print(f"Camera initialized successfully {crop_status}")
+            print(f"  Output size: {output_width}x{output_height}")
         except Exception as e:
             raise RuntimeError(f"Failed to initialize camera: {e}")
     
@@ -107,6 +147,37 @@ class WaterMeterCamera:
                 continue
         
         return frames
+    
+    def set_crop_region(self, x, y, width, height):
+        """
+        Update the crop region dynamically (requires camera restart to apply).
+        
+        Args:
+            x, y: Top-left corner in sensor coordinates (before rotation)
+            width, height: Crop dimensions in sensor coordinates
+        """
+        self.crop_region = (x, y, width, height)
+        self.crop_enabled = True
+        print(f"Crop region updated to: {self.crop_region}")
+        print("Note: Camera must be reinitialized for crop to take effect")
+    
+    def enable_crop(self, enabled=True):
+        """Enable or disable hardware cropping."""
+        self.crop_enabled = enabled
+        status = "enabled" if enabled else "disabled"
+        print(f"Hardware crop {status}")
+        print("Note: Camera must be reinitialized for change to take effect")
+    
+    def get_crop_info(self):
+        """Return current crop configuration."""
+        return {
+            'enabled': self.crop_enabled,
+            'region': self.crop_region,
+            'x': self.crop_region[0],
+            'y': self.crop_region[1],
+            'width': self.crop_region[2],
+            'height': self.crop_region[3]
+        }
     
     def close(self):
         """Close the camera and release resources."""
