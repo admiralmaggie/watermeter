@@ -125,6 +125,8 @@ class WaterMeterCamera:
             raise RuntimeError("Camera not initialized. Call initialize() first.")
         
         try:
+            print(f"Capturing image with exposure compensation: {exposure_compensation:+.1f} EV")
+
             # Set exposure compensation if specified
             if exposure_compensation != 0.0:
                 self.camera.set_controls({"ExposureValue": exposure_compensation})
@@ -142,6 +144,7 @@ class WaterMeterCamera:
             if exposure_compensation != 0.0:
                 self.camera.set_controls({"ExposureValue": 0.0})
             
+            print("Image captured successfully.")
             return frame
         except Exception as e:
             raise RuntimeError(f"Failed to capture image: {e}")
