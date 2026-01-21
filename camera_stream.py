@@ -4,6 +4,10 @@ Camera Streaming Microservice for Water Meter Troubleshooting
 Streams the Raspberry Pi camera to a web browser for setup and debugging.
 """
 
+import os
+# Set environment variable to disable OpenCV GUI for headless operation
+os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+
 from flask import Flask, render_template, Response
 import cv2
 import numpy as np

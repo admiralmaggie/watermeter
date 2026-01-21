@@ -3,8 +3,12 @@ import numpy as np
 import time
 import sys
 import argparse
+import os
 from matplotlib import pyplot as plt
 from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
+
+# Detect if we're running in headless mode (no display available)
+HEADLESS = os.environ.get('DISPLAY', '') == '' or os.environ.get('HEADLESS', '0') == '1'
 
 HORIZONTAL_MAX_DIFF = 1000
 COLOR_ORANGE = (0,128,255)
@@ -21,7 +25,8 @@ SAVE_IMAGE = False
 fig, ax = plt.subplots(figsize=(6, 6))
 
 # Toggle verbose visualization + saving intermediate masks for debugging
-DEBUG_NEEDLE = True
+# Automatically disabled in headless mode
+DEBUG_NEEDLE = True and not HEADLESS
 
 # --- Circle detection tuning ---
 # HoughCircles is sensitive to contrast/edges. The most robust approach I've found
@@ -179,7 +184,7 @@ def find_needle(image, cx, cy, radius):
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-    if DEBUG_NEEDLE:
+    if DEBUG_NEEDLE and not HEADLESS:
         cv2.imshow(f"needle_mask_{int(cx)}", mask)
 
     # Create a mask for the ring where the needle's pointer (triangle) should be
@@ -193,7 +198,7 @@ def find_needle(image, cx, cy, radius):
     # Apply the ring mask to our needle mask
     target_mask = cv2.bitwise_and(mask, ring_mask)
 
-    if DEBUG_NEEDLE:
+    if DEBUG_NEEDLE and not HEADLESS:
         cv2.imshow(f"needle_target_{int(cx)}", target_mask)
     
     # Find the largest contour in the ring (which should be the needle)
@@ -254,7 +259,9 @@ def find_needle(image, cx, cy, radius):
             cv2.line(overlay, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 255, 0), 2)
             cv2.circle(overlay, (int(tip_x), int(tip_y)), 6, (255, 0, 255), -1)
             cv2.circle(overlay, (int(center_roi[0]), int(center_roi[1])), 4, (0, 255, 255), -1)
-            cv2.imshow(f"needle_overlay_{int(cx)}", overlay)
+            
+            if not HEADLESS:
+                cv2.imshow(f"needle_overlay_{int(cx)}", overlay)
 
             # Save debug artifacts for offline inspection
             cv2.imwrite(f"_debug_needle_mask_{int(cx)}.png", mask)
@@ -351,10 +358,11 @@ def find_circles(frame):
     circles = sorted(circles, key=lambda c: c[0])
 
     # DEBUG: show selected circles
-    debug_output = frame.copy()
-    for (x, y, r) in circles:
-        cv2.circle(debug_output, (x, y), r, COLOR_GREEN, 3)
-    cv2.imshow("selected_circles", debug_output)
+    if not HEADLESS:
+        debug_output = frame.copy()
+        for (x, y, r) in circles:
+            cv2.circle(debug_output, (x, y), r, COLOR_GREEN, 3)
+        cv2.imshow("selected_circles", debug_output)
 
     # ignore results if an exact number of dials wasn't found
     if len(circles) != DIALS_COUNT:
@@ -401,7 +409,8 @@ def find_circles(frame):
         filename = time.strftime("data/sample-%Y%m%d-%H%M-out.jpg")
         cv2.imwrite(filename, output)
 
-    cv2.imshow("output", output)
+    if not HEADLESS:
+        cv2.imshow("output", output)
 
 def read_value(value, convention):
     if convention == "CCW":
@@ -456,7 +465,8 @@ def main():
                         
                         print(f"Waiting {args.interval} seconds...")
                         time.sleep(args.interval)
-                        cv2.destroyAllWindows()
+                        if not HEADLESS:
+                            cv2.destroyAllWindows()
                 except KeyboardInterrupt:
                     print("\nStopping continuous capture...")
         else:
@@ -471,9 +481,12 @@ def main():
                 
                 find_circles(frame)
                 
-                print("DEBUG: Processing complete. Press any key to exit...")
-                cv2.waitKey(0)
-                cv2.destroyAllWindows()
+                if not HEADLESS:
+                    print("DEBUG: Processing complete. Press any key to exit...")
+                    cv2.waitKey(0)
+                    cv2.destroyAllWindows()
+                else:
+                    print("DEBUG: Processing complete (headless mode - no display)")
     else:
         # File mode (original behavior)
         image_path = args.file
@@ -486,9 +499,12 @@ def main():
         
         find_circles(frame)
         
-        print("DEBUG: Processing complete. Press any key to exit...")
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+        if not HEADLESS:
+            print("DEBUG: Processing complete. Press any key to exit...")
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+        else:
+            print("DEBUG: Processing complete (headless mode - no display)")
 
 if __name__ == "__main__":
     main()
