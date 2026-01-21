@@ -34,7 +34,8 @@ PREVIEW_HEIGHT = int(os.getenv('PREVIEW_HEIGHT', '480'))
 
 # Autofocus settings (loaded from .env)
 AUTOFOCUS_ENABLED = os.getenv('AUTOFOCUS_ENABLED', 'true').lower() == 'true'
-AUTOFOCUS_MODE = os.getenv('AUTOFOCUS_MODE', 'continuous').lower()  # 'continuous' or 'trigger'
+AUTOFOCUS_MODE = os.getenv('AUTOFOCUS_MODE', 'continuous').lower()  # 'continuous', 'trigger', or 'manual'
+LENS_POSITION = float(os.getenv('LENS_POSITION', '1.0'))  # Lens position for manual mode (0.0-10.0)
 
 class WaterMeterCamera:
     """Wrapper for Raspberry Pi camera operations."""
@@ -85,20 +86,42 @@ class WaterMeterCamera:
                     print(f"Warning: Failed to apply ScalerCrop: {crop_error}")
                     print("  Continuing with full sensor...")
             
-            # Set autofocus mode if enabled (Pi Camera v3)
+            # Set autofocus mode (Pi Camera v3)
+            # AfMode: 0=Manual, 1=Auto (trigger), 2=Continuous
             if AUTOFOCUS_ENABLED:
                 if AUTOFOCUS_MODE == 'continuous':
                     try:
-                        self.camera.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
-                        print("Autofocus enabled (continuous mode)")
+                        self.camera.set_controls({"AfMode": 2})  # Continuous autofocus
+                        print("Autofocus: Continuous mode (AfMode=2)")
                     except Exception as af_error:
                         print(f"Autofocus not available or failed: {af_error}")
                 elif AUTOFOCUS_MODE == 'trigger':
-                    print("Autofocus enabled (trigger mode - will focus before each capture)")
+                    try:
+                        self.camera.set_controls({"AfMode": 1})  # Auto/trigger mode
+                        print("Autofocus: Trigger mode (AfMode=1)")
+                    except Exception as af_error:
+                        print(f"Autofocus not available or failed: {af_error}")
+                elif AUTOFOCUS_MODE == 'manual':
+                    try:
+                        self.camera.set_controls({
+                            "AfMode": 0,  # Manual mode
+                            "LensPosition": LENS_POSITION
+                        })
+                        print(f"Autofocus: Manual mode (AfMode=0, LensPosition={LENS_POSITION})")
+                    except Exception as af_error:
+                        print(f"Manual focus not available or failed: {af_error}")
                 else:
-                    print(f"Warning: Unknown autofocus mode '{AUTOFOCUS_MODE}', autofocus disabled")
+                    print(f"Warning: Unknown autofocus mode '{AUTOFOCUS_MODE}', using default")
             else:
-                print("Autofocus disabled")
+                try:
+                    # When autofocus disabled, set manual mode with default lens position
+                    self.camera.set_controls({
+                        "AfMode": 0,  # Manual mode
+                        "LensPosition": LENS_POSITION
+                    })
+                    print(f"Autofocus: Disabled (Manual mode, LensPosition={LENS_POSITION})")
+                except Exception:
+                    print("Autofocus: Disabled")
             
             self.camera.start()
             # Allow camera to warm up, adjust exposure, and autofocus to settle
@@ -132,10 +155,13 @@ class WaterMeterCamera:
                 self.camera.set_controls({"ExposureValue": exposure_compensation})
                 time.sleep(0.5)  # Allow exposure to adjust
             
-            # Trigger autofocus cycle before capture (if in trigger mode or continuous mode)
+            # Trigger autofocus cycle before capture (only in trigger mode)
             if AUTOFOCUS_ENABLED and AUTOFOCUS_MODE == 'trigger':
-                self.camera.autofocus_cycle()
-                time.sleep(0.3)  # Wait for focus to settle
+                try:
+                    self.camera.autofocus_cycle()
+                    time.sleep(0.3)  # Wait for focus to settle
+                except Exception as e:
+                    print(f"Warning: Autofocus trigger failed: {e}")
             
             # Capture image as numpy array
             frame = self.camera.capture_array()
