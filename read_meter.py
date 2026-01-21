@@ -472,7 +472,7 @@ def read_ocr_digits_mechanical(frame, x, y, w, h):
         
         # Save debug image for this digit
         if OCR_DEBUG:
-            cv2.imwrite(f'_debug_ocr_digit_{i}.png', digit_resized)
+            cv2.imwrite(f'data/_debug_ocr_digit_{i}.png', digit_resized)
         
         # Configure tesseract for single character recognition
         config = '--psm 10 --oem 3'  # PSM 10 = single character
@@ -522,8 +522,8 @@ def read_ocr_digits_mechanical(frame, x, y, w, h):
                cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_GREEN, 1)
     
     if OCR_DEBUG:
-        cv2.imwrite('_debug_ocr_result.png', debug_img)
-        print(f"  OCR debug image saved to _debug_ocr_result.png")
+        cv2.imwrite('data/_debug_ocr_result.png', debug_img)
+        print(f"  OCR debug image saved to data/_debug_ocr_result.png")
     
     return final_text, avg_confidence, debug_img
 
