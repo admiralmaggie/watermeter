@@ -32,6 +32,10 @@ CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '2592'))
 PREVIEW_WIDTH = int(os.getenv('PREVIEW_WIDTH', '640'))
 PREVIEW_HEIGHT = int(os.getenv('PREVIEW_HEIGHT', '480'))
 
+# Autofocus settings (loaded from .env)
+AUTOFOCUS_ENABLED = os.getenv('AUTOFOCUS_ENABLED', 'true').lower() == 'true'
+AUTOFOCUS_MODE = os.getenv('AUTOFOCUS_MODE', 'continuous').lower()  # 'continuous' or 'trigger'
+
 class WaterMeterCamera:
     """Wrapper for Raspberry Pi camera operations."""
     
@@ -81,12 +85,20 @@ class WaterMeterCamera:
                     print(f"Warning: Failed to apply ScalerCrop: {crop_error}")
                     print("  Continuing with full sensor...")
             
-            # Set autofocus mode if supported (Pi Camera v3)
-            try:
-                self.camera.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
-                print("Autofocus enabled (continuous mode)")
-            except Exception as af_error:
-                print(f"Autofocus not available or failed: {af_error}")
+            # Set autofocus mode if enabled (Pi Camera v3)
+            if AUTOFOCUS_ENABLED:
+                if AUTOFOCUS_MODE == 'continuous':
+                    try:
+                        self.camera.set_controls({"AfMode": 2})  # 2 = Continuous autofocus
+                        print("Autofocus enabled (continuous mode)")
+                    except Exception as af_error:
+                        print(f"Autofocus not available or failed: {af_error}")
+                elif AUTOFOCUS_MODE == 'trigger':
+                    print("Autofocus enabled (trigger mode - will focus before each capture)")
+                else:
+                    print(f"Warning: Unknown autofocus mode '{AUTOFOCUS_MODE}', autofocus disabled")
+            else:
+                print("Autofocus disabled")
             
             self.camera.start()
             # Allow camera to warm up, adjust exposure, and autofocus to settle
@@ -118,9 +130,10 @@ class WaterMeterCamera:
                 self.camera.set_controls({"ExposureValue": exposure_compensation})
                 time.sleep(0.5)  # Allow exposure to adjust
             
-            # Trigger autofocus cycle before capture
-            self.camera.autofocus_cycle()
-            time.sleep(0.3)  # Wait for focus to settle
+            # Trigger autofocus cycle before capture (if in trigger mode or continuous mode)
+            if AUTOFOCUS_ENABLED and AUTOFOCUS_MODE == 'trigger':
+                self.camera.autofocus_cycle()
+                time.sleep(0.3)  # Wait for focus to settle
             
             # Capture image as numpy array
             frame = self.camera.capture_array()
