@@ -170,10 +170,10 @@ def find_needle(image, cx, cy, radius):
     h, s, v = cv2.split(hsv)
 
     # Red hue wraps around, so we combine two ranges.
-    # Tune these thresholds per camera/lighting.
-    lower1 = np.array([0, 80, 60], dtype=np.uint8)
-    upper1 = np.array([10, 255, 255], dtype=np.uint8)
-    lower2 = np.array([170, 80, 60], dtype=np.uint8)
+    # Optimized for bright red-pink needles in US Gallons meter
+    lower1 = np.array([0, 100, 120], dtype=np.uint8)  # Bright red (higher saturation & value)
+    upper1 = np.array([15, 255, 255], dtype=np.uint8)  # Extended to catch pink tones
+    lower2 = np.array([160, 100, 120], dtype=np.uint8)  # Magenta/pink range
     upper2 = np.array([180, 255, 255], dtype=np.uint8)
     mask1 = cv2.inRange(hsv, lower1, upper1)
     mask2 = cv2.inRange(hsv, lower2, upper2)
@@ -212,7 +212,8 @@ def find_needle(image, cx, cy, radius):
     # Fit a line through ALL candidate needle pixels and choose the endpoint farthest
     # from the dial center as the needle tip.
     ys, xs = np.where(target_mask > 0)
-    if xs.size > 80:
+    # Lowered threshold for blob-shaped needles (50 instead of 80)
+    if xs.size > 50:
         pts = np.stack([xs, ys], axis=1).astype(np.float32)
 
         # Fit line (vx,vy) through points; (x0,y0) is a point on the line
