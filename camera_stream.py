@@ -17,6 +17,9 @@ import sys
 
 app = Flask(__name__)
 
+# Fine rotation adjustment (in degrees, negative = clockwise)
+FINE_ROTATION_ANGLE = -4
+
 # Global camera instance
 camera = None
 
@@ -47,10 +50,10 @@ def generate_frames():
             # Rotate image 90 degrees clockwise
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             
-            # Apply 3-degree clockwise rotation for alignment
+            # Apply fine rotation for alignment
             height, width = frame.shape[:2]
             center = (width / 2, height / 2)
-            rotation_matrix = cv2.getRotationMatrix2D(center, -3, 1.0)
+            rotation_matrix = cv2.getRotationMatrix2D(center, FINE_ROTATION_ANGLE, 1.0)
             frame = cv2.warpAffine(frame, rotation_matrix, (width, height), 
                                     flags=cv2.INTER_LINEAR, 
                                     borderMode=cv2.BORDER_CONSTANT,

@@ -24,6 +24,9 @@ DIALS_COUNT = 3
 SAVE_IMAGE = False
 fig, ax = plt.subplots(figsize=(6, 6))
 
+# Fine rotation adjustment (in degrees, negative = clockwise)
+FINE_ROTATION_ANGLE = -4
+
 # Toggle verbose visualization + saving intermediate masks for debugging
 # Automatically disabled in headless mode
 DEBUG_NEEDLE = True and not HEADLESS
@@ -546,8 +549,8 @@ def main():
                             # Rotate image 90 degrees clockwise
                             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                         
-                        # Apply 3-degree clockwise rotation for alignment
-                        frame = rotate_image(frame, -3)
+                        # Apply fine rotation for alignment
+                        frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                         
                         find_circles(frame)
                         
@@ -594,8 +597,8 @@ def main():
                     # Rotate image 90 degrees clockwise
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 
-                # Apply 3-degree clockwise rotation for alignment
-                frame = rotate_image(frame, -3)
+                # Apply fine rotation for alignment
+                frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                 
                 find_circles(frame)
                 
