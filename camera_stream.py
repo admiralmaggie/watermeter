@@ -50,14 +50,15 @@ def generate_frames():
             # Rotate image 90 degrees clockwise
             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
             
-            # Apply fine rotation for alignment
-            height, width = frame.shape[:2]
-            center = (width / 2, height / 2)
-            rotation_matrix = cv2.getRotationMatrix2D(center, FINE_ROTATION_ANGLE, 1.0)
-            frame = cv2.warpAffine(frame, rotation_matrix, (width, height), 
-                                    flags=cv2.INTER_LINEAR, 
-                                    borderMode=cv2.BORDER_CONSTANT,
-                                    borderValue=(255, 255, 255))
+            # Apply fine rotation for alignment (if enabled)
+            if FINE_ROTATION_ANGLE != 0:
+                height, width = frame.shape[:2]
+                center = (width / 2, height / 2)
+                rotation_matrix = cv2.getRotationMatrix2D(center, FINE_ROTATION_ANGLE, 1.0)
+                frame = cv2.warpAffine(frame, rotation_matrix, (width, height), 
+                                        flags=cv2.INTER_LINEAR, 
+                                        borderMode=cv2.BORDER_CONSTANT,
+                                        borderValue=(255, 255, 255))
             
             # Encode frame as JPEG
             ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])

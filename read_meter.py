@@ -549,8 +549,9 @@ def main():
                             # Rotate image 90 degrees clockwise
                             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                         
-                        # Apply fine rotation for alignment
-                        frame = rotate_image(frame, FINE_ROTATION_ANGLE)
+                        # Apply fine rotation for alignment (if enabled)
+                        if FINE_ROTATION_ANGLE != 0:
+                            frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                         
                         find_circles(frame)
                         
@@ -597,8 +598,9 @@ def main():
                     # Rotate image 90 degrees clockwise
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                 
-                # Apply fine rotation for alignment
-                frame = rotate_image(frame, FINE_ROTATION_ANGLE)
+                # Apply fine rotation for alignment (if enabled)
+                if FINE_ROTATION_ANGLE != 0:
+                    frame = rotate_image(frame, FINE_ROTATION_ANGLE)
                 
                 find_circles(frame)
                 
