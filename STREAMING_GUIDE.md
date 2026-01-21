@@ -57,6 +57,9 @@ pkill -f camera_stream.py
 ### Testing Without Camera (Development)
 The service will fail to start if `picamera2` is not available or no camera is detected. This is expected on development machines.
 
+### Headless Mode
+The streaming service is designed to work in headless mode (no display). Unlike `read_meter.py` which uses `cv2.imshow()`, the streaming service only uses OpenCV for image encoding and serves the video feed through Flask, so it works perfectly on headless Raspberry Pi systems.
+
 ## Troubleshooting
 
 ### Port Already in Use
@@ -73,6 +76,14 @@ ERROR: picamera2 not available. Cannot start streaming.
 ```bash
 sudo raspi-config
 # Interface Options → Camera → Enable
+```
+
+### Qt/XCB Display Error
+If you encounter Qt/XCB display errors, this is typically a `read_meter.py` issue, not the streaming service. However, if you do see such errors:
+```bash
+# Use opencv-python-headless instead
+pip uninstall opencv-python
+pip install opencv-python-headless
 ```
 
 ### Slow Streaming

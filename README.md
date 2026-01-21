@@ -141,7 +141,54 @@ lores={"size": (640, 480)}   # Preview resolution
 4. **Value Conversion**: Converts angle (0-360°) to dial reading (0-10)
 5. **Final Reading**: Combines all dial values into a complete meter reading
 
+## Headless Mode (No Display)
+
+When running on a Raspberry Pi without a display (SSH/headless mode), the scripts automatically detect this and disable all GUI windows (`cv2.imshow`). Debug images are still saved to disk for offline inspection.
+
+**Automatic Detection:**
+- The scripts detect headless mode by checking if the `DISPLAY` environment variable is empty
+- All visualization windows are automatically disabled
+- Debug images continue to be saved as PNG files (e.g., `_debug_needle_mask_*.png`)
+
+**Manual Override:**
+```bash
+# Force headless mode even if DISPLAY is set
+export HEADLESS=1
+python read_meter.py --camera
+
+# Or for a single command
+HEADLESS=1 python read_meter.py --camera
+```
+
+**Using opencv-python-headless:**
+For a cleaner installation on headless systems, you can install the headless version of OpenCV:
+```bash
+pip uninstall opencv-python
+pip install opencv-python-headless
+```
+
 ## Troubleshooting
+
+### Qt/XCB Display Error
+
+```
+qt.qpa.xcb: could not connect to display
+qt.qpa.plugin: Could not load the Qt platform plugin "xcb"
+```
+
+**Solution:** This occurs when running on a headless Raspberry Pi. The scripts now automatically detect headless mode and disable GUI windows. If you still see this error:
+
+1. **Use opencv-python-headless:**
+   ```bash
+   pip uninstall opencv-python
+   pip install opencv-python-headless
+   ```
+
+2. **Or force headless mode:**
+   ```bash
+   export HEADLESS=1
+   python read_meter.py --camera
+   ```
 
 ### Camera Not Found
 

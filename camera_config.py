@@ -45,6 +45,7 @@ class WaterMeterCamera:
         
         try:
             # Capture image as numpy array (BGR format compatible with OpenCV)
+            self.camera.autofocus_cycle()
             frame = self.camera.capture_array()
             return frame
         except Exception as e:
