@@ -11,14 +11,18 @@ os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
 from flask import Flask, render_template, Response
 import cv2
 import numpy as np
+from dotenv import load_dotenv
 from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
 import time
 import sys
 
+# Load environment variables from .env file
+load_dotenv()
+
 app = Flask(__name__)
 
-# Fine rotation adjustment (in degrees, negative = clockwise)
-FINE_ROTATION_ANGLE = -4
+# Fine rotation adjustment (in degrees, negative = clockwise) - loaded from .env
+FINE_ROTATION_ANGLE = int(os.getenv('FINE_ROTATION_ANGLE', '-4'))
 
 # Global camera instance
 camera = None

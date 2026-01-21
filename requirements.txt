@@ -8,6 +8,9 @@ matplotlib>=3.7.0
 # Flask web framework for camera streaming microservice
 Flask>=3.0.0
 
+# Environment variable management
+python-dotenv>=1.0.0
+
 # Raspberry Pi camera support (only works on Raspberry Pi hardware)
 # Install on Raspberry Pi with: sudo apt install -y python3-picamera2
 # Or: pip install picamera2

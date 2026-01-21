@@ -5,7 +5,11 @@ import sys
 import argparse
 import os
 from matplotlib import pyplot as plt
+from dotenv import load_dotenv
 from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Detect if we're running in headless mode (no display available)
 HEADLESS = os.environ.get('DISPLAY', '') == '' or os.environ.get('HEADLESS', '0') == '1'
@@ -20,18 +24,20 @@ COLOR_BLUE = (255,0,0)
 # Allow overriding the image from the command line:
 #   python test.py test1.jpeg
 IMAGE_PATH = sys.argv[1] if len(sys.argv) > 1 else 'test.jpeg'
-DIALS_COUNT = 3
+
+# Configuration from .env
+DIALS_COUNT = int(os.getenv('DIALS_COUNT', '3'))
 SAVE_IMAGE = False
 fig, ax = plt.subplots(figsize=(6, 6))
 
-# Fine rotation adjustment (in degrees, negative = clockwise)
-FINE_ROTATION_ANGLE = -4
+# Fine rotation adjustment (in degrees, negative = clockwise) - from .env
+FINE_ROTATION_ANGLE = int(os.getenv('FINE_ROTATION_ANGLE', '-4'))
 
 # Toggle verbose visualization + saving intermediate masks for debugging
-# Automatically disabled in headless mode
-DEBUG_NEEDLE = True and not HEADLESS
+# Automatically disabled in headless mode - can be overridden in .env
+DEBUG_NEEDLE = os.getenv('DEBUG_NEEDLE', 'true').lower() == 'true' and not HEADLESS
 
-# --- Circle detection tuning ---
+# --- Circle detection tuning (loaded from .env) ---
 # HoughCircles is sensitive to contrast/edges. The most robust approach I've found
 # here is:
 #   1) Run Hough on a *downscaled* grayscale image (faster + fewer noisy edges)
@@ -39,11 +45,24 @@ DEBUG_NEEDLE = True and not HEADLESS
 #   3) If extras remain, score candidates by edge-strength around the circumference
 #      and keep the best DIALS_COUNT.
 HOUGH_TARGET_WIDTH = 1000
-HOUGH_DP = 1.2
-HOUGH_PARAM1 = 120
-HOUGH_PARAM2 = 45  # accumulator threshold; increase to reduce false circles
-RADIUS_MIN_FRAC = 0.04
-RADIUS_MAX_FRAC = 0.12
+HOUGH_DP = float(os.getenv('HOUGH_DP', '1.2'))
+HOUGH_PARAM1 = int(os.getenv('HOUGH_PARAM1', '120'))
+HOUGH_PARAM2 = int(os.getenv('HOUGH_PARAM2', '45'))  # accumulator threshold; increase to reduce false circles
+RADIUS_MIN_FRAC = float(os.getenv('RADIUS_MIN_FRAC', '0.04'))
+RADIUS_MAX_FRAC = float(os.getenv('RADIUS_MAX_FRAC', '0.12'))
+
+# Needle detection settings (loaded from .env)
+NEEDLE_MIN_PIXELS = int(os.getenv('NEEDLE_MIN_PIXELS', '80'))
+
+# HSV thresholds for red needle detection (loaded from .env)
+RED_HUE_LOWER1 = int(os.getenv('RED_HUE_LOWER1', '0'))
+RED_SAT_LOWER1 = int(os.getenv('RED_SAT_LOWER1', '80'))
+RED_VAL_LOWER1 = int(os.getenv('RED_VAL_LOWER1', '60'))
+RED_HUE_UPPER1 = int(os.getenv('RED_HUE_UPPER1', '10'))
+
+RED_HUE_LOWER2 = int(os.getenv('RED_HUE_LOWER2', '170'))
+RED_SAT_LOWER2 = int(os.getenv('RED_SAT_LOWER2', '80'))
+RED_VAL_LOWER2 = int(os.getenv('RED_VAL_LOWER2', '60'))
 
 
 def _resize_for_hough(frame: np.ndarray, target_width: int = HOUGH_TARGET_WIDTH):
@@ -173,10 +192,10 @@ def find_needle(image, cx, cy, radius):
     h, s, v = cv2.split(hsv)
 
     # Red hue wraps around, so we combine two ranges.
-    # Tune these thresholds per camera/lighting.
-    lower1 = np.array([0, 80, 60], dtype=np.uint8)
-    upper1 = np.array([10, 255, 255], dtype=np.uint8)
-    lower2 = np.array([170, 80, 60], dtype=np.uint8)
+    # Thresholds loaded from .env configuration
+    lower1 = np.array([RED_HUE_LOWER1, RED_SAT_LOWER1, RED_VAL_LOWER1], dtype=np.uint8)
+    upper1 = np.array([RED_HUE_UPPER1, 255, 255], dtype=np.uint8)
+    lower2 = np.array([RED_HUE_LOWER2, RED_SAT_LOWER2, RED_VAL_LOWER2], dtype=np.uint8)
     upper2 = np.array([180, 255, 255], dtype=np.uint8)
     mask1 = cv2.inRange(hsv, lower1, upper1)
     mask2 = cv2.inRange(hsv, lower2, upper2)
@@ -215,7 +234,7 @@ def find_needle(image, cx, cy, radius):
     # Fit a line through ALL candidate needle pixels and choose the endpoint farthest
     # from the dial center as the needle tip.
     ys, xs = np.where(target_mask > 0)
-    if xs.size > 80:
+    if xs.size > NEEDLE_MIN_PIXELS:
         pts = np.stack([xs, ys], axis=1).astype(np.float32)
 
         # Fit line (vx,vy) through points; (x0,y0) is a point on the line

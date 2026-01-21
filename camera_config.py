@@ -1,6 +1,12 @@
 # Camera configuration for Raspberry Pi
 # This module handles camera initialization and image capture
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 try:
     from picamera2 import Picamera2
     import time
@@ -9,15 +15,22 @@ except ImportError:
     CAMERA_AVAILABLE = False
     print("WARNING: picamera2 not available. Camera features disabled.")
 
-# Hardware Crop Configuration (applied at sensor/ISP level before rotation)
+# Hardware Crop Configuration (loaded from .env)
 # Coordinates are in sensor space (4608x2592 landscape before 90° clockwise rotation)
 # Format: (x, y, width, height) where (x,y) is top-left corner
-CROP_ENABLED = False
-CROP_REGION = (0, 0, 4608, 2592)  # Full sensor by default
+CROP_ENABLED = os.getenv('CROP_ENABLED', 'false').lower() == 'true'
+CROP_REGION = (
+    int(os.getenv('CROP_X', '0')),
+    int(os.getenv('CROP_Y', '0')),
+    int(os.getenv('CROP_WIDTH', '4608')),
+    int(os.getenv('CROP_HEIGHT', '2592'))
+)
 
-# Example crop regions (uncomment to use):
-# Center 50%: CROP_REGION = (1152, 648, 2304, 1296)
-# Center 75%: CROP_REGION = (576, 324, 3456, 1944)
+# Camera resolution settings (loaded from .env)
+CAMERA_WIDTH = int(os.getenv('CAMERA_WIDTH', '4608'))
+CAMERA_HEIGHT = int(os.getenv('CAMERA_HEIGHT', '2592'))
+PREVIEW_WIDTH = int(os.getenv('PREVIEW_WIDTH', '640'))
+PREVIEW_HEIGHT = int(os.getenv('PREVIEW_HEIGHT', '480'))
 
 class WaterMeterCamera:
     """Wrapper for Raspberry Pi camera operations."""
@@ -51,10 +64,10 @@ class WaterMeterCamera:
                 output_height = 2592
                 print("Hardware crop disabled - using full sensor")
             
-            # Configure camera for maximum resolution still images
+            # Configure camera for still images (using settings from .env)
             config = self.camera.create_still_configuration(
                 main={"size": (output_width, output_height)},
-                lores={"size": (640, 480)},
+                lores={"size": (PREVIEW_WIDTH, PREVIEW_HEIGHT)},
                 display="lores"
             )
             self.camera.configure(config)
