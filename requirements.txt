@@ -1,0 +1,14 @@
+# Water Meter Reader - Python Dependencies
+
+# Core dependencies for image processing and meter reading
+opencv-python>=4.8.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+
+# Flask web framework for camera streaming microservice
+Flask>=3.0.0
+
+# Raspberry Pi camera support (only works on Raspberry Pi hardware)
+# Install on Raspberry Pi with: sudo apt install -y python3-picamera2
+# Or: pip install picamera2
+picamera2>=0.3.0; platform_machine == "aarch64" or platform_machine == "armv7l"
