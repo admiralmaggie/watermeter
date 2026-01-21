@@ -342,8 +342,8 @@ def detect_digit_windows(roi):
     edges = cv2.Canny(gray, OCR_CANNY_THRESHOLD1, OCR_CANNY_THRESHOLD2, apertureSize=3, L2gradient=True)
     
     if OCR_DEBUG:
-        cv2.imwrite('_debug_ocr_edges.png', edges)
-        print(f"  Canny edges saved to _debug_ocr_edges.png")
+        cv2.imwrite('data/_debug_ocr_edges.png', edges)
+        print(f"  Canny edges saved to data/_debug_ocr_edges.png")
     
     # Find contours
     contours, _ = cv2.findContours(edges.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
