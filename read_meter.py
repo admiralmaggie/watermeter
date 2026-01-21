@@ -347,6 +347,7 @@ def detect_digit_windows(roi):
     
     # Find contours
     contours, _ = cv2.findContours(edges.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    print(f"  Found {len(contours)} total contours")
     
     # Filter contours by area and dimensions
     contours_dict = dict()
