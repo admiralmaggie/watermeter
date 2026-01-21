@@ -291,6 +291,17 @@ def process_values(values):
 
     return reading
 
+def rotate_image(image, angle):
+    """Rotate image by specified angle (degrees) around center."""
+    height, width = image.shape[:2]
+    center = (width / 2, height / 2)
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, rotation_matrix, (width, height), 
+                              flags=cv2.INTER_LINEAR, 
+                              borderMode=cv2.BORDER_CONSTANT,
+                              borderValue=(255, 255, 255))
+    return rotated
+
 def find_circles(frame):
     if frame is None:
         print(f"DEBUG: Error: Could not read image from {IMAGE_PATH}.")
@@ -534,6 +545,9 @@ def main():
                             # Rotate image 90 degrees clockwise
                             frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
                         
+                        # Apply 3-degree fine rotation for alignment
+                        frame = rotate_image(frame, 3)
+                        
                         find_circles(frame)
                         
                         print(f"Waiting {args.interval} seconds...")
@@ -578,6 +592,9 @@ def main():
                     
                     # Rotate image 90 degrees clockwise
                     frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                
+                # Apply 3-degree fine rotation for alignment
+                frame = rotate_image(frame, 3)
                 
                 find_circles(frame)
                 
