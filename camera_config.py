@@ -237,12 +237,15 @@ class WaterMeterCamera:
         """Close the camera and release resources."""
         if self.camera is not None:
             try:
+                if self.debug: print("DEBUG: Stopping and closing camera...")
                 self.camera.stop()
                 self.camera.close()
                 self.is_initialized = False
-                print("Camera closed successfully")
+                if self.debug: print("DEBUG: Camera closed successfully")
             except Exception as e:
                 print(f"Error closing camera: {e}")
+>>>>+++ REPLACE
+
     
     def __enter__(self):
         """Context manager entry."""

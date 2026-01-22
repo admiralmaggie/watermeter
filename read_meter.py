@@ -720,6 +720,8 @@ def main():
                        help='Comma-separated EV values for bracketing (default: -1.0,0.0,1.0)')
     parser.add_argument('--motion', action='store_true',
                        help='Enable motion detection (uses zones from .env)')
+    parser.add_argument('--debug', action='store_true',
+                       help='Show detailed debugging information')
     
     args = parser.parse_args()
     
@@ -744,7 +746,7 @@ def main():
         if args.continuous:
             # Continuous capture mode
             print(f"Continuous capture mode - interval: {args.interval}s. Press Ctrl+C to stop.")
-            with WaterMeterCamera() as camera:
+            with WaterMeterCamera(debug=args.debug) as camera:
                 try:
                     while True:
                         print(f"\n{time.strftime('%Y-%m-%d %H:%M:%S')} - Capturing image...")
@@ -790,7 +792,7 @@ def main():
         else:
             # Single capture mode
             print("Single capture mode...")
-            with WaterMeterCamera() as camera:
+            with WaterMeterCamera(debug=args.debug) as camera:
                 if args.bracket:
                     # Parse exposure values
                     exposures = [float(x.strip()) for x in args.exposures.split(',')]
