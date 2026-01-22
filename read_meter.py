@@ -300,11 +300,11 @@ def read_meter_from_frame(frame, motion_detector=None, show_gui=False):
         if show_gui:
             cv2.circle(output, (x, y), r, COLOR_GREEN, 3)
             cv2.line(output, (x, y), tip, COLOR_MAGENTA, 2)
-            cv2.putText(output, f"{val:.1f}", (x-20, y+r+20), cv2.FONT_HERSHEY_PLAIN, 3, COLOR_BLUE)
+            cv2.putText(output, f"{val:.1f}", (x-20, y+r+50), cv2.FONT_HERSHEY_DUPLEX, 3, COLOR_BLUE)
     
     reading = process_values(values)
     if show_gui:
-        cv2.putText(output, f"Reading: {reading}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 3, COLOR_BLUE, 2)
+        cv2.putText(output, f"Reading: {reading}", (50, 50), cv2.FONT_HERSHEY_DUPLEX, 3, COLOR_BLUE, 2)
     return reading, motion_detected, output
 
 
