@@ -403,19 +403,29 @@ def find_needle(image, cx, cy, radius):
     return best_value, needle_tip
 
 def process_values(values):
-    reading = ''
-    for i, (v) in enumerate(values):
+    """
+    Process dial values into a single reading string.
+    Accounts for needles being between numbers by checking the next dial.
+    """
+    digits = []
+    for i, v in enumerate(values):
         whole = int(np.floor(v))
-        if i == len(values) - 1:
-            reading = reading + str(whole)
-            break
-        decimals = v - whole
-        if decimals < 0.5 and values[i+1] > 5:
-            # decimal value low but the next value is high, so need to adjust the reading by -1
-            whole = whole-1
-        reading = reading + str(whole)
+        # If not the last dial, check if we need to adjust based on the next dial
+        if i < len(values) - 1:
+            decimals = v - whole
+            # If the current dial is just past a number but the next dial is still high (e.g., 9),
+            # then the current dial hasn't actually reached that number yet.
+            if decimals < 0.5 and values[i+1] > 5:
+                whole -= 1
+        
+        # Use % 10 to handle negative results (e.g., -1 becomes 9)
+        digits.append(str(whole % 10))
 
-    return reading
+    # Formatting: If we have 3 or more dials, the last one is typically x0.1
+    if len(digits) >= 3:
+        return "".join(digits[:-1]) + "." + digits[-1]
+    
+    return "".join(digits)
 
 def rotate_image(image, angle):
     """Rotate image by specified angle (degrees) around center.
