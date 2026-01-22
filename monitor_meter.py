@@ -83,9 +83,12 @@ def main():
     motion_det = MotionDetector(zone1, zone2, MOTION_THRESHOLD, MOTION_FRAME_SKIP)
     
     args = MonitorArgs()
-    last_upload_time = 0
+    last_upload_time = time.time()
     motion_start_time = None
     leak_alert_sent = False
+    
+    last_absolute_reading = None
+    accumulated_usage = 0.0
 
     # Disable image saving by default in monitor mode unless forced
     read_meter.SAVE_IMAGE = os.getenv('SAVE_MONITOR_IMAGES', 'false').lower() == 'true'
@@ -119,13 +122,31 @@ def main():
                     motion_start_time = None
                     leak_alert_sent = False
 
-                # 4. Handle Telemetry Upload Logic
+                # 4. Handle Usage Calculation and Telemetry Upload
                 if reading is not None:
                     try:
                         # Convert reading (e.g. "02.0") to float
-                        usage = float(reading)
+                        current_reading = float(reading)
+                        
+                        if last_absolute_reading is not None:
+                            # Calculate delta, handling rollover at 100.0
+                            # % 100 works for positive and negative deltas (rollover)
+                            delta = (current_reading - last_absolute_reading) % 100
+                            
+                            # Sanity check: if delta is very large, it might be a reading error
+                            # (e.g. 99.9 gallons used in 5 seconds is unlikely)
+                            if delta < 50.0: 
+                                accumulated_usage += delta
+                            else:
+                                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Warning: Ignored large delta {delta:.1f}")
+                        
+                        last_absolute_reading = current_reading
+
+                        # Time to upload?
                         if now - last_upload_time >= UPLOAD_INTERVAL_SEC:
-                            send_telemetry(usage)
+                            # Round to 1 decimal point
+                            send_telemetry(round(accumulated_usage, 1))
+                            accumulated_usage = 0.0
                             last_upload_time = now
                     except ValueError:
                         print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Warning: Could not parse reading '{reading}'")
