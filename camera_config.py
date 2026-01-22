@@ -70,10 +70,9 @@ class WaterMeterCamera:
                 print("Hardware crop disabled - using full sensor")
             
             # Configure camera for still images (using settings from .env)
+            # No preview/lores stream for faster performance
             config = self.camera.create_still_configuration(
-                main={"size": (output_width, output_height)},
-                lores={"size": (PREVIEW_WIDTH, PREVIEW_HEIGHT)},
-                display="lores"
+                main={"size": (output_width, output_height)}
             )
             self.camera.configure(config)
             
