@@ -209,14 +209,29 @@ def find_needle(image, cx, cy, radius):
     x_max, y_max = min(image.shape[1], int(cx + radius)), min(image.shape[0], int(cy + radius))
     roi = image[y_min:y_max, x_min:x_max]
     if roi.size == 0: return 0, (cx, cy)
+    
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     mask = get_needle_mask(hsv)
+    
     ring_mask = np.zeros_like(mask)
     center_roi = (cx - x_min, cy - y_min)
     cv2.circle(ring_mask, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.9), 255, -1)
     cv2.circle(ring_mask, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.2), 0, -1)
     target_mask = cv2.bitwise_and(mask, ring_mask)
+    
     ys, xs = np.where(target_mask > 0)
+    
+    if DEBUG_NEEDLE:
+        # Create a visual overlay of the detection process
+        debug_overlay = roi.copy()
+        cv2.circle(debug_overlay, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.9), (255, 255, 0), 1)
+        cv2.circle(debug_overlay, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.2), (255, 255, 0), 1)
+        
+        prefix = f"data/debug_dial_{int(cx)}_{int(cy)}"
+        cv2.imwrite(f"{prefix}_0_roi.jpg", roi)
+        cv2.imwrite(f"{prefix}_1_mask.jpg", mask)
+        cv2.imwrite(f"{prefix}_2_target.jpg", target_mask)
+
     if xs.size > NEEDLE_MIN_PIXELS:
         pts = np.stack([xs, ys], axis=1).astype(np.float32)
         vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
@@ -226,9 +241,16 @@ def find_needle(image, cx, cy, radius):
         p2 = np.array([x0 + t.max() * vx, y0 + t.max() * vy])
         center = np.array([center_roi[0], center_roi[1]])
         tip = p1 if np.linalg.norm(p1 - center) > np.linalg.norm(p2 - center) else p2
+        
+        if DEBUG_NEEDLE:
+            cv2.line(debug_overlay, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (0, 255, 255), 2)
+            cv2.circle(debug_overlay, (int(tip[0]), int(tip[1])), 5, (255, 0, 255), -1)
+            cv2.imwrite(f"{prefix}_3_overlay.jpg", debug_overlay)
+
         angle_deg = np.degrees(np.arctan2(tip[1] - center_roi[1], tip[0] - center_roi[0]))
         best_value = 10 * ((angle_deg + 90) % 360) / 360
         return best_value, (int(x_min + tip[0]), int(y_min + tip[1]))
+    
     return 0, (cx, cy)
 
 
@@ -342,11 +364,14 @@ def main():
     parser.add_argument('--file', type=str, default='test.jpeg')
     parser.add_argument('--continuous', action='store_true')
     parser.add_argument('--save', action='store_true')
+    parser.add_argument('--debug', action='store_true')
     parser.add_argument('--interval', type=int, default=5)
     args = parser.parse_args()
     
-    global SAVE_IMAGE
+    global SAVE_IMAGE, DEBUG_NEEDLE
     SAVE_IMAGE = args.save
+    if args.debug:
+        DEBUG_NEEDLE = True
     
     if args.camera:
         with WaterMeterCamera() as cam:
