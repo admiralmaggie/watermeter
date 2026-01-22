@@ -266,6 +266,10 @@ def get_frame_from_camera(camera, args):
 
 def read_meter_from_frame(frame, motion_detector=None, show_gui=False):
     if frame is None: return None, False, None
+    
+    if SAVE_IMAGE:
+        cv2.imwrite(time.strftime("data/sample-%Y%m%d-%H%M.jpg"), frame)
+        
     output = frame.copy()
     motion_detected = False
     if motion_detector:
@@ -305,6 +309,10 @@ def read_meter_from_frame(frame, motion_detector=None, show_gui=False):
     reading = process_values(values)
     if show_gui:
         cv2.putText(output, f"Reading: {reading}", (50, 50), cv2.FONT_HERSHEY_DUPLEX, 3, COLOR_BLUE, 2)
+
+    if SAVE_IMAGE:
+        cv2.imwrite(time.strftime("data/sample-%Y%m%d-%H%M-out.jpg"), output)
+
     return reading, motion_detected, output
 
 
@@ -333,8 +341,12 @@ def main():
     parser.add_argument('--camera', action='store_true')
     parser.add_argument('--file', type=str, default='test.jpeg')
     parser.add_argument('--continuous', action='store_true')
+    parser.add_argument('--save', action='store_true')
     parser.add_argument('--interval', type=int, default=5)
     args = parser.parse_args()
+    
+    global SAVE_IMAGE
+    SAVE_IMAGE = args.save
     
     if args.camera:
         with WaterMeterCamera() as cam:
