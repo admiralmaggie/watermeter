@@ -103,7 +103,7 @@ def main():
                     continue
 
                 # 2. Process frame for reading and motion
-                reading, motion_detected = read_meter_from_frame(frame, motion_det, show_gui=False)
+                reading, motion_detected, _ = read_meter_from_frame(frame, motion_det, show_gui=False)
                 
                 now = time.time()
 
