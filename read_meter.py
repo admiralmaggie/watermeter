@@ -4,7 +4,6 @@ import time
 import sys
 import argparse
 import os
-from matplotlib import pyplot as plt
 from dotenv import load_dotenv
 from camera_config import WaterMeterCamera, CAMERA_AVAILABLE
 
@@ -21,16 +20,11 @@ COLOR_GREEN = (0,255,0)
 COLOR_RED = (0,0,255)
 COLOR_BLUE = (255,0,0)
 
-# Allow overriding the image from the command line:
-#   python test.py test1.jpeg
-IMAGE_PATH = sys.argv[1] if len(sys.argv) > 1 else 'test.jpeg'
-
 # Configuration from .env
 DIALS_COUNT = int(os.getenv('DIALS_COUNT', '3'))
 USE_MANUAL_CIRCLES = os.getenv('USE_MANUAL_CIRCLES', 'false').lower() == 'true'
 MANUAL_CIRCLES_STR = os.getenv('MANUAL_CIRCLES', '')
 SAVE_IMAGE = False
-fig, ax = plt.subplots(figsize=(6, 6))
 
 # Fine rotation adjustment (in degrees, negative = clockwise) - from .env
 FINE_ROTATION_ANGLE = float(os.getenv('FINE_ROTATION_ANGLE', '-4'))
@@ -307,91 +301,44 @@ def select_best_circles(circles, gray: np.ndarray, expected_count: int):
     scored.sort(key=lambda t: t[0], reverse=True)
     return [c for _, c in scored[:expected_count]]
 
-def filter_circles(circles):
-    print(f"DEBUG: filter_circles received {len(circles[0]) if circles is not None else 0} raw circles")
-    # convert the (x, y) coordinates and radius of the circles to integers
-    circles = np.round(circles[0, :]).astype("int")
-    # sort by X-axis
-    circles = sorted(circles, key=lambda x: x[0])
-
-    print(f"DEBUG: Circles after sorting by X-axis: {circles}")
-
-    # remove circles with Y-axis deviating too much from the rest
-    valid_circles = []
-    min_y = None
-    for c in circles:
-        y = c[1]
-        if min_y == None:
-            min_y = y
-        if y < min_y:
-            min_y = y
-
-    for c in circles:
-        x = c[0]
-        y = c[1]
-        r = c[2]
-        if abs(y-min_y) < HORIZONTAL_MAX_DIFF:
-            valid_circles.append((x, y, r))
-        else:
-            print(f"DEBUG: Circle at ({x}, {y}) filtered out due to Y-axis deviation (min_y={min_y})")
-
-    print("Found #%i circles after filtering:" % len(valid_circles))
-    return valid_circles
-
-def find_needle(image, cx, cy, radius):
-    """
-    Finds the needle by scanning radial lines and finding the one with the most dark pixels.
-    """
-    # Use a slightly smaller radius to stay within the dial
-    scan_radius = radius * 0.9
-    # Start slightly away from the center to avoid the hub
-    start_offset = radius * 0.15
-    
-    slices = 100 # Increased resolution (3.6 degrees per slice)
-    factor = 360 / slices
-    
-    best_value = 0
-    max_darkness_score = -1
-    needle_tip = (cx, cy)
-
-    # Pre-calculate grayscale for the ROI to speed up
-    x_min = max(0, int(cx - radius))
-    y_min = max(0, int(cy - radius))
-    x_max = min(image.shape[1], int(cx + radius))
-    y_max = min(image.shape[0], int(cy + radius))
-    roi = image[y_min:y_max, x_min:x_max]
-    
-    if roi.size == 0:
-        return 0, (cx, cy)
-        
-    # Isolate RED pixels.
-    # In warm lighting the BGR-difference method can incorrectly classify much of the
-    # dial background as "red". HSV thresholding is typically more robust.
-    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-
+def get_needle_mask(hsv_roi):
+    """Isolate red pixels in the ROI and return a cleaned mask."""
     # Red hue wraps around, so we combine two ranges.
     # Thresholds loaded from .env configuration
     lower1 = np.array([RED_HUE_LOWER1, RED_SAT_LOWER1, RED_VAL_LOWER1], dtype=np.uint8)
     upper1 = np.array([RED_HUE_UPPER1, 255, 255], dtype=np.uint8)
     lower2 = np.array([RED_HUE_LOWER2, RED_SAT_LOWER2, RED_VAL_LOWER2], dtype=np.uint8)
     upper2 = np.array([180, 255, 255], dtype=np.uint8)
-    mask1 = cv2.inRange(hsv, lower1, upper1)
-    mask2 = cv2.inRange(hsv, lower2, upper2)
+    
+    mask1 = cv2.inRange(hsv_roi, lower1, upper1)
+    mask2 = cv2.inRange(hsv_roi, lower2, upper2)
     mask = cv2.bitwise_or(mask1, mask2)
 
     # Clean up small noise / fill gaps
     kernel = np.ones((3, 3), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+    return mask
+
+def find_needle(image, cx, cy, radius):
+    """
+    Finds the needle by isolating red pixels and fitting a line to estimate direction.
+    """
+    x_min, y_min = max(0, int(cx - radius)), max(0, int(cy - radius))
+    x_max, y_max = min(image.shape[1], int(cx + radius)), min(image.shape[0], int(cy + radius))
+    roi = image[y_min:y_max, x_min:x_max]
+    
+    if roi.size == 0:
+        return 0, (cx, cy)
+        
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    mask = get_needle_mask(hsv)
 
     if DEBUG_NEEDLE and not HEADLESS:
         cv2.imshow(f"needle_mask_{int(cx)}", mask)
 
     # Create a mask for the ring where the needle's pointer (triangle) should be
-    # This ignores the hub (center circle) and the dial edge
     ring_mask = np.zeros_like(mask)
-    h, w = mask.shape
     center_roi = (cx - x_min, cy - y_min)
     cv2.circle(ring_mask, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.9), 255, -1)
     cv2.circle(ring_mask, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.2), 0, -1)
@@ -402,13 +349,6 @@ def find_needle(image, cx, cy, radius):
     if DEBUG_NEEDLE and not HEADLESS:
         cv2.imshow(f"needle_target_{int(cx)}", target_mask)
     
-    # Find the largest contour in the ring (which should be the needle)
-    contours, _ = cv2.findContours(target_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    needle_contour = None
-    if contours:
-        needle_contour = max(contours, key=cv2.contourArea)
-        
     # Robust direction estimation:
     # Fit a line through ALL candidate needle pixels and choose the endpoint farthest
     # from the dial center as the needle tip.
@@ -418,7 +358,6 @@ def find_needle(image, cx, cy, radius):
 
         # Fit line (vx,vy) through points; (x0,y0) is a point on the line
         vx, vy, x0, y0 = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
-        # fitLine returns 1x1 arrays; extract scalars explicitly
         vx, vy, x0, y0 = float(vx[0]), float(vy[0]), float(x0[0]), float(y0[0])
 
         # Project points onto line and take extreme projections to estimate endpoints
@@ -434,29 +373,16 @@ def find_needle(image, cx, cy, radius):
         tip_x, tip_y = float(tip[0]), float(tip[1])
         
         # Vector from dial center to the furthest point (the tip)
-        dx = tip_x - center_roi[0]
-        dy = tip_y - center_roi[1]
+        dx, dy = tip_x - center_roi[0], tip_y - center_roi[1]
         
         # Calculate angle (0 is Top)
-        # atan2(y, x) gives angle from Right. 
-        # We want 0 at Top, so we use atan2(dx, -dy) or adjust atan2(dy, dx)
-        angle_rad = np.arctan2(dy, dx)
-        angle_deg = np.degrees(angle_rad)
-        
-        # Normalize to 0-360 starting from Top (-90 deg in standard coord)
-        # Standard: Right=0, Down=90, Left=180, Up=270
-        # We want: Up=0, Right=90, Down=180, Left=270
+        angle_deg = np.degrees(np.arctan2(dy, dx))
         normalized_angle = (angle_deg + 90) % 360
         best_value = 10 * normalized_angle / 360
-        
-        # Calculate needle tip for visualization
-        # Use the detected tip position (mapped back to image coords) for visualization
         needle_tip = (int(x_min + tip_x), int(y_min + tip_y))
 
         if DEBUG_NEEDLE:
             overlay = roi.copy()
-            if needle_contour is not None:
-                cv2.drawContours(overlay, [needle_contour], -1, (0, 255, 0), 2)
             cv2.line(overlay, (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), (255, 255, 0), 2)
             cv2.circle(overlay, (int(tip_x), int(tip_y)), 6, (255, 0, 255), -1)
             cv2.circle(overlay, (int(center_roi[0]), int(center_roi[1])), 4, (0, 255, 255), -1)
@@ -472,8 +398,7 @@ def find_needle(image, cx, cy, radius):
         print(f"DEBUG: Needle tip found at ({tip_x:.1f}, {tip_y:.1f}), angle: {normalized_angle:.1f} deg, value: {best_value:.2f}")
     else:
         print("DEBUG: No dark pixels found in needle ring.")
-        best_value = 0
-        needle_tip = (cx, cy)
+        best_value, needle_tip = 0, (cx, cy)
 
     return best_value, needle_tip
 
@@ -504,9 +429,35 @@ def rotate_image(image, angle):
                               borderValue=(255, 255, 255))
     return rotated
 
+def get_frame_from_camera(camera, args):
+    """Capture and preprocess a frame from the camera."""
+    if args.bracket:
+        exposures = [float(x.strip()) for x in args.exposures.split(",")]
+        frames_raw = camera.capture_bracketed(exposures)
+        
+        frames = []
+        for frame in frames_raw:
+            if frame.shape[2] == 3:
+                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            frames.append(frame)
+        
+        print("Selecting best exposure...")
+        frame = select_best_exposure(frames)
+    else:
+        frame = camera.capture_image()
+        if frame.shape[2] == 3:
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    
+    if FINE_ROTATION_ANGLE != 0:
+        frame = rotate_image(frame, FINE_ROTATION_ANGLE)
+        
+    return frame
+
 def find_circles(frame, motion_detector=None):
     if frame is None:
-        print(f"DEBUG: Error: Could not read image from {IMAGE_PATH}.")
+        print("DEBUG: Error: Received None frame in find_circles.")
         return
 
     print(f"DEBUG: find_circles started. Frame shape: {frame.shape}")
@@ -587,7 +538,7 @@ def find_circles(frame, motion_detector=None):
         circles = sorted(circles, key=lambda c: c[0])
 
     # TODO: move to config. In the provided images, all dials appear to be Clockwise (CW).
-    readout_conventions = ["CW", "CW", "CW", "CW", "CW"]
+    readout_conventions = ["CW"] * DIALS_COUNT
 
     # DEBUG: show selected circles
     if not HEADLESS:
@@ -743,44 +694,13 @@ def main():
             zone2 = (MOTION_ZONE2_X, MOTION_ZONE2_Y, MOTION_ZONE2_R)
             motion_det = MotionDetector(zone1, zone2, MOTION_THRESHOLD, MOTION_FRAME_SKIP)
         
-        if args.continuous:
-            # Continuous capture mode
-            print(f"Continuous capture mode - interval: {args.interval}s. Press Ctrl+C to stop.")
-            with WaterMeterCamera(debug=args.debug) as camera:
+        with WaterMeterCamera(debug=args.debug) as camera:
+            if args.continuous:
+                print(f"Continuous capture mode - interval: {args.interval}s. Press Ctrl+C to stop.")
                 try:
                     while True:
                         print(f"\n{time.strftime('%Y-%m-%d %H:%M:%S')} - Capturing image...")
-                        
-                        if args.bracket:
-                            # Parse exposure values
-                            exposures = [float(x.strip()) for x in args.exposures.split(',')]
-                            frames_raw = camera.capture_bracketed(exposures)
-                            
-                            # Convert all frames from RGB to BGR
-                            frames = []
-                            for frame in frames_raw:
-                                if frame.shape[2] == 3:
-                                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                                frames.append(frame)
-                            
-                            # Select best exposure
-                            print("Selecting best exposure...")
-                            frame = select_best_exposure(frames)
-                        else:
-                            frame = camera.capture_image()
-                            
-                            # Convert from RGB to BGR for OpenCV
-                            if frame.shape[2] == 3:
-                                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                            
-                            # Rotate image 90 degrees clockwise
-                            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                        
-                        # Apply fine rotation for alignment (if enabled)
-                        if FINE_ROTATION_ANGLE != 0:
-                            frame = rotate_image(frame, FINE_ROTATION_ANGLE)
-                        
+                        frame = get_frame_from_camera(camera, args)
                         find_circles(frame, motion_det)
                         
                         print(f"Waiting {args.interval} seconds...")
@@ -789,47 +709,9 @@ def main():
                             cv2.destroyAllWindows()
                 except KeyboardInterrupt:
                     print("\nStopping continuous capture...")
-        else:
-            # Single capture mode
-            print("Single capture mode...")
-            with WaterMeterCamera(debug=args.debug) as camera:
-                if args.bracket:
-                    # Parse exposure values
-                    exposures = [float(x.strip()) for x in args.exposures.split(',')]
-                    frames_raw = camera.capture_bracketed(exposures)
-                    
-                    # Convert all frames from RGB to BGR
-                    frames = []
-                    for frame in frames_raw:
-                        if frame.shape[2] == 3:
-                            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                        frames.append(frame)
-                    
-                    # Select best exposure
-                    print("Selecting best exposure...")
-                    frame = select_best_exposure(frames)
-                    
-                    # Optionally save all bracketed frames
-                    if args.save:
-                        for i, f in enumerate(frames):
-                            filename = time.strftime(f"data/bracket-{i+1}-%Y%m%d-%H%M.jpg")
-                            cv2.imwrite(filename, f)
-                            print(f"Saved bracketed frame {i+1} to {filename}")
-                else:
-                    frame = camera.capture_image()
-                    
-                    # Convert from RGB to BGR for OpenCV
-                    if frame.shape[2] == 3:
-                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    
-                    # Rotate image 90 degrees clockwise
-                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-                
-                # Apply fine rotation for alignment (if enabled)
-                if FINE_ROTATION_ANGLE != 0:
-                    frame = rotate_image(frame, FINE_ROTATION_ANGLE)
-                
+            else:
+                print("Single capture mode...")
+                frame = get_frame_from_camera(camera, args)
                 find_circles(frame, motion_det)
                 
                 if not HEADLESS:
