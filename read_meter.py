@@ -473,144 +473,104 @@ def get_frame_from_camera(camera, args):
     return frame
 
 def find_circles(frame, motion_detector=None):
-    if frame is None:
-        print("DEBUG: Error: Received None frame in find_circles.")
-        return
+    """Legacy wrapper for find_circles, now uses read_meter_from_frame."""
+    reading, _ = read_meter_from_frame(frame, motion_detector, show_gui=not HEADLESS)
+    return reading
 
-    print(f"DEBUG: find_circles started. Frame shape: {frame.shape}")
+def read_meter_from_frame(frame, motion_detector=None, show_gui=False):
+    """
+    Process a single frame to detect dials, read the meter value, and detect motion.
+    Returns: (reading_string, motion_detected_bool)
+    """
+    if frame is None:
+        return None, False
 
     if SAVE_IMAGE:
         filename = time.strftime("data/sample-%Y%m%d-%H%M.jpg")
         cv2.imwrite(filename, frame)
 
     output = frame.copy()
+    motion_detected = False
     
     # Process motion detection if enabled
     if motion_detector is not None:
         motion1, motion2, percent1, percent2 = motion_detector.process_frame(frame)
-        output = motion_detector.draw_zones(output)
+        motion_detected = motion1 or motion2
+        if show_gui:
+            output = motion_detector.draw_zones(output)
 
-    # Check if using manual circles
+    # Dial detection
     if USE_MANUAL_CIRCLES:
-        print("DEBUG: Using manual circle coordinates from .env")
         circles = parse_manual_circles(MANUAL_CIRCLES_STR)
-        
-        if len(circles) == 0:
-            print("ERROR: Manual circles enabled but no valid coordinates provided.")
-            print("      Set MANUAL_CIRCLES in .env file (format: x1,y1,r1;x2,y2,r2;x3,y3,r3)")
-            return
-        
         if len(circles) != DIALS_COUNT:
-            print(f"WARNING: Found {len(circles)} manual circles but expected {DIALS_COUNT}")
-        
-        print(f"DEBUG: Loaded {len(circles)} manual circles: {circles}")
-        
-        # Sort by X so dials are left-to-right
+            print(f"WARNING: Expected {DIALS_COUNT} manual circles, found {len(circles)}")
         circles = sorted(circles, key=lambda c: c[0])
     else:
-        # Dynamic circle detection using Hough Transform
-        print("DEBUG: Detecting circles dynamically using HoughCircles...")
         hough_frame, scale = _resize_for_hough(frame)
         gray = cv2.cvtColor(hough_frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 1.5)
-
-        # Dynamic radius bounds based on image size
         mind = min(gray.shape[0], gray.shape[1])
         min_radius = max(10, int(mind * RADIUS_MIN_FRAC))
         max_radius = max(min_radius + 1, int(mind * RADIUS_MAX_FRAC))
-
-        print(
-            f"DEBUG: HoughCircles params: scale={scale:.3f}, minR={min_radius}, "
-            f"maxR={max_radius}, param2={HOUGH_PARAM2}"
-        )
         
         circles_raw = cv2.HoughCircles(
-            gray,
-            cv2.HOUGH_GRADIENT,
-            dp=HOUGH_DP,
-            minDist=max(10, min_radius),
-            param1=HOUGH_PARAM1,
-            param2=HOUGH_PARAM2,
-            minRadius=min_radius,
-            maxRadius=max_radius,
+            gray, cv2.HOUGH_GRADIENT, dp=HOUGH_DP,
+            minDist=max(10, min_radius), param1=HOUGH_PARAM1,
+            param2=HOUGH_PARAM2, minRadius=min_radius, maxRadius=max_radius,
         )
 
         if circles_raw is None:
-            print("DEBUG: No circles found by HoughCircles.")
-            return
+            if show_gui: cv2.imshow("output", output)
+            return None, motion_detected
 
-        # Select the best dials even if Hough finds extras
         selected = select_best_circles(circles_raw, gray, DIALS_COUNT)
-
-        # Map circle coords back to original resolution
         circles = []
         for (x, y, r) in selected:
             if scale != 1.0:
-                x = int(round(x / scale))
-                y = int(round(y / scale))
-                r = int(round(r / scale))
+                x, y, r = int(round(x / scale)), int(round(y / scale)), int(round(r / scale))
             circles.append((x, y, r))
-
-        # Sort by X so dials are left-to-right
         circles = sorted(circles, key=lambda c: c[0])
 
-    # TODO: move to config. In the provided images, all dials appear to be Clockwise (CW).
-    readout_conventions = ["CW"] * DIALS_COUNT
-
-    # DEBUG: show selected circles
-    if not HEADLESS:
-        debug_output = frame.copy()
-        for (x, y, r) in circles:
-            cv2.circle(debug_output, (x, y), r, COLOR_GREEN, 3)
-        cv2.imshow("selected_circles", debug_output)
-
-    # ignore results if an exact number of dials wasn't found
     if len(circles) != DIALS_COUNT:
-        print(
-            f"DEBUG: Found {len(circles)} selected circles, but expected {DIALS_COUNT}. "
-            "Skipping processing. (Try increasing HOUGH_PARAM2 to reduce false circles.)"
-        )
-        cv2.imshow("output", output)
-        return
+        if show_gui: cv2.imshow("output", output)
+        return None, motion_detected
 
+    # Process dials
     values = []
+    readout_conventions = ["CW"] * DIALS_COUNT
+    minx = miny = radius = 0
 
-    # loop over the (x, y) coordinates and radius of the circles
-    minx = 0
-    miny = 0
-    radius = 0
     for i, ((x, y, r), convention) in enumerate(zip(circles, readout_conventions)):
-        print(f"DEBUG: Processing circle #{i} at ({x}, {y}) with radius {r}")
         value, tip = find_needle(output, x, y, r)
         actual_value = read_value(value, convention)
         values.append(actual_value)
-        print("#%i: (%i, %i) radius: %i - value: %f" % (i, x, y, r, actual_value))
 
-        # draw needle and value
-        cv2.line(output, (x, y), tip, COLOR_MAGENTA, thickness=2)
-        cv2.putText(output, str(actual_value), (x - 20, y + r + 20), cv2.FONT_HERSHEY_PLAIN, 1, 255)
-
-        # draw the circle in the output image, then draw a rectangle
-        # corresponding to the center of the circle
-        cv2.circle(output, (x, y), r, COLOR_GREEN, 4)
-        cv2.rectangle(output, (x - 2, y - 2), (x + 2, y + 2), COLOR_ORANGE, -1)
+        if show_gui:
+            cv2.line(output, (x, y), tip, COLOR_MAGENTA, thickness=2)
+            cv2.putText(output, str(actual_value), (x - 20, y + r + 20), cv2.FONT_HERSHEY_PLAIN, 1, 255)
+            cv2.circle(output, (x, y), r, COLOR_GREEN, 4)
+            cv2.rectangle(output, (x - 2, y - 2), (x + 2, y + 2), COLOR_ORANGE, -1)
 
         if i == 0:
-            minx = x
-            miny = y
-            radius = r
+            minx, miny, radius = x, y, r
 
-    # TODO: compare to the previous reading? it should never be less than the previous one
     reading = process_values(values)
-    print("Final reading: %s" % reading)
-    cv2.putText(output, reading, (minx, miny + radius + 100), cv2.FONT_HERSHEY_PLAIN, 2, COLOR_BLUE)
+    
+    if show_gui:
+        cv2.putText(output, reading, (minx, miny + radius + 100), cv2.FONT_HERSHEY_PLAIN, 2, COLOR_BLUE)
+        cv2.imshow("output", output)
+        
+        # Show selected circles debug window
+        debug_circles = frame.copy()
+        for (x, y, r) in circles:
+            cv2.circle(debug_circles, (x, y), r, COLOR_GREEN, 3)
+        cv2.imshow("selected_circles", debug_circles)
 
     if SAVE_IMAGE:
         filename = time.strftime("data/sample-%Y%m%d-%H%M-out.jpg")
         cv2.imwrite(filename, output)
 
-    if not HEADLESS:
-        cv2.imshow("output", output)
+    return reading, motion_detected
 
 def select_best_exposure(frames):
     """

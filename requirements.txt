@@ -11,6 +11,9 @@ Flask>=3.0.0
 # Environment variable management
 python-dotenv>=1.0.0
 
+# HTTP requests for telemetry and alerts
+requests>=2.31.0
+
 # OCR support for reading digital displays (optional)
 # Requires tesseract-ocr to be installed on the system
 # Install on Raspberry Pi: sudo apt-get install tesseract-ocr
