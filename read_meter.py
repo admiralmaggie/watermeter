@@ -55,6 +55,7 @@ RED_SAT_LOWER2 = int(os.getenv('RED_SAT_LOWER2', '80'))
 RED_VAL_LOWER2 = int(os.getenv('RED_VAL_LOWER2', '60'))
 
 # Motion detection settings (loaded from .env)
+MOTION_DETECTION_ENABLED = os.getenv('MOTION_DETECTION_ENABLED', 'false').lower() == 'true'
 MOTION_ZONE1_X = int(os.getenv('MOTION_ZONE1_X', '200'))
 MOTION_ZONE1_Y = int(os.getenv('MOTION_ZONE1_Y', '400'))
 MOTION_ZONE1_R = int(os.getenv('MOTION_ZONE1_R', '100'))
