@@ -555,6 +555,7 @@ def read_meter_from_frame(frame, motion_detector=None, show_gui=False):
             minx, miny, radius = x, y, r
 
     reading = process_values(values)
+    print(f"Meter Reading: {reading}")
     
     if show_gui:
         cv2.putText(output, reading, (minx, miny + radius + 100), cv2.FONT_HERSHEY_PLAIN, 2, COLOR_BLUE)
