@@ -40,19 +40,22 @@ LENS_POSITION = float(os.getenv('LENS_POSITION', '1.0'))  # Lens position for ma
 class WaterMeterCamera:
     """Wrapper for Raspberry Pi camera operations."""
     
-    def __init__(self, crop_enabled=None, crop_region=None):
+    def __init__(self, crop_enabled=None, crop_region=None, debug=False):
         self.camera = None
         self.is_initialized = False
+        self.debug = debug
         # Use provided crop settings or fall back to module defaults
         self.crop_enabled = crop_enabled if crop_enabled is not None else CROP_ENABLED
         self.crop_region = crop_region if crop_region is not None else CROP_REGION
         
     def initialize(self):
         """Initialize the Raspberry Pi camera."""
+        if self.debug: print("DEBUG: Starting camera initialization...")
         if not CAMERA_AVAILABLE:
             raise RuntimeError("picamera2 library not installed. Install with: pip install picamera2")
         
         try:
+            if self.debug: print("DEBUG: Creating Picamera2 instance...")
             self.camera = Picamera2()
             
             # Determine output size based on crop settings
@@ -60,17 +63,19 @@ class WaterMeterCamera:
                 # Use crop dimensions as output size
                 output_width = self.crop_region[2]
                 output_height = self.crop_region[3]
-                print(f"Hardware crop enabled: {self.crop_region}")
-                print(f"  Crop region: x={self.crop_region[0]}, y={self.crop_region[1]}, "
-                      f"w={output_width}, h={output_height}")
+                if self.debug:
+                    print(f"DEBUG: Hardware crop enabled: {self.crop_region}")
+                    print(f"DEBUG:   Crop region: x={self.crop_region[0]}, y={self.crop_region[1]}, "
+                          f"w={output_width}, h={output_height}")
             else:
                 # Use full sensor resolution
                 output_width = 4608
                 output_height = 2592
-                print("Hardware crop disabled - using full sensor")
+                if self.debug: print("DEBUG: Hardware crop disabled - using full sensor")
             
             # Configure camera for still images (using settings from .env)
             # No preview/lores stream for faster performance
+            if self.debug: print(f"DEBUG: Configuring camera with size {output_width}x{output_height}...")
             config = self.camera.create_still_configuration(
                 main={"size": (output_width, output_height)}
             )
@@ -79,8 +84,9 @@ class WaterMeterCamera:
             # Apply hardware crop if enabled (BEFORE camera start)
             if self.crop_enabled:
                 try:
+                    if self.debug: print(f"DEBUG: Applying ScalerCrop {self.crop_region}...")
                     self.camera.set_controls({"ScalerCrop": self.crop_region})
-                    print("Hardware ScalerCrop applied successfully")
+                    if self.debug: print("DEBUG: Hardware ScalerCrop applied successfully")
                 except Exception as crop_error:
                     print(f"Warning: Failed to apply ScalerCrop: {crop_error}")
                     print("  Continuing with full sensor...")
@@ -90,23 +96,26 @@ class WaterMeterCamera:
             if AUTOFOCUS_ENABLED:
                 if AUTOFOCUS_MODE == 'continuous':
                     try:
+                        if self.debug: print("DEBUG: Setting AfMode to 2 (Continuous)...")
                         self.camera.set_controls({"AfMode": 2})  # Continuous autofocus
-                        print("Autofocus: Continuous mode (AfMode=2)")
+                        if self.debug: print("Autofocus: Continuous mode (AfMode=2)")
                     except Exception as af_error:
                         print(f"Autofocus not available or failed: {af_error}")
                 elif AUTOFOCUS_MODE == 'trigger':
                     try:
+                        if self.debug: print("DEBUG: Setting AfMode to 1 (Trigger)...")
                         self.camera.set_controls({"AfMode": 1})  # Auto/trigger mode
-                        print("Autofocus: Trigger mode (AfMode=1)")
+                        if self.debug: print("Autofocus: Trigger mode (AfMode=1)")
                     except Exception as af_error:
                         print(f"Autofocus not available or failed: {af_error}")
                 elif AUTOFOCUS_MODE == 'manual':
                     try:
+                        if self.debug: print(f"DEBUG: Setting AfMode to 0 (Manual) with LensPosition={LENS_POSITION}...")
                         self.camera.set_controls({
                             "AfMode": 0,  # Manual mode
                             "LensPosition": LENS_POSITION
                         })
-                        print(f"Autofocus: Manual mode (AfMode=0, LensPosition={LENS_POSITION})")
+                        if self.debug: print(f"Autofocus: Manual mode (AfMode=0, LensPosition={LENS_POSITION})")
                     except Exception as af_error:
                         print(f"Manual focus not available or failed: {af_error}")
                 else:
@@ -114,22 +123,26 @@ class WaterMeterCamera:
             else:
                 try:
                     # When autofocus disabled, set manual mode with default lens position
+                    if self.debug: print(f"DEBUG: Autofocus disabled, setting Manual mode (LensPosition={LENS_POSITION})...")
                     self.camera.set_controls({
                         "AfMode": 0,  # Manual mode
                         "LensPosition": LENS_POSITION
                     })
-                    print(f"Autofocus: Disabled (Manual mode, LensPosition={LENS_POSITION})")
+                    if self.debug: print(f"Autofocus: Disabled (Manual mode, LensPosition={LENS_POSITION})")
                 except Exception:
-                    print("Autofocus: Disabled")
+                    if self.debug: print("Autofocus: Disabled")
             
+            if self.debug: print("DEBUG: Starting camera...")
             self.camera.start()
             # Allow camera to warm up, adjust exposure, and autofocus to settle
+            if self.debug: print("DEBUG: Waiting 3 seconds for camera to settle...")
             time.sleep(3)
             self.is_initialized = True
             
             crop_status = f"with crop {self.crop_region}" if self.crop_enabled else "at full resolution"
-            print(f"Camera initialized successfully {crop_status}")
-            print(f"  Output size: {output_width}x{output_height}")
+            if self.debug:
+                print(f"DEBUG: Camera initialized successfully {crop_status}")
+                print(f"DEBUG:   Output size: {output_width}x{output_height}")
         except Exception as e:
             raise RuntimeError(f"Failed to initialize camera: {e}")
     
@@ -147,29 +160,35 @@ class WaterMeterCamera:
             raise RuntimeError("Camera not initialized. Call initialize() first.")
         
         try:
-            print(f"Capturing image with exposure compensation: {exposure_compensation:+.1f} EV")
+            if self.debug: print(f"DEBUG: Capturing image with exposure compensation: {exposure_compensation:+.1f} EV")
 
             # Set exposure compensation if specified
             if exposure_compensation != 0.0:
+                if self.debug: print(f"DEBUG: Setting ExposureValue to {exposure_compensation}...")
                 self.camera.set_controls({"ExposureValue": exposure_compensation})
+                if self.debug: print("DEBUG: Waiting 0.5s for exposure to adjust...")
                 time.sleep(0.5)  # Allow exposure to adjust
             
             # Trigger autofocus cycle before capture (only in trigger mode)
             if AUTOFOCUS_ENABLED and AUTOFOCUS_MODE == 'trigger':
                 try:
+                    if self.debug: print("DEBUG: Triggering autofocus cycle...")
                     self.camera.autofocus_cycle()
+                    if self.debug: print("DEBUG: Waiting 0.3s for focus to settle...")
                     time.sleep(0.3)  # Wait for focus to settle
                 except Exception as e:
                     print(f"Warning: Autofocus trigger failed: {e}")
             
             # Capture image as numpy array
+            if self.debug: print("DEBUG: Executing capture_array()...")
             frame = self.camera.capture_array()
             
             # Reset exposure compensation to normal
             if exposure_compensation != 0.0:
+                if self.debug: print("DEBUG: Resetting ExposureValue to 0.0...")
                 self.camera.set_controls({"ExposureValue": 0.0})
             
-            print("Image captured successfully.")
+            if self.debug: print("DEBUG: Image captured successfully.")
             return frame
         except Exception as e:
             raise RuntimeError(f"Failed to capture image: {e}")
@@ -189,11 +208,11 @@ class WaterMeterCamera:
             raise RuntimeError("Camera not initialized. Call initialize() first.")
         
         frames = []
-        print(f"Capturing {len(exposures)} bracketed exposures: {exposures}")
+        if self.debug: print(f"DEBUG: Capturing {len(exposures)} bracketed exposures: {exposures}")
         
         for i, ev in enumerate(exposures):
             try:
-                print(f"  Capture {i+1}/{len(exposures)} at EV {ev:+.1f}...")
+                if self.debug: print(f"DEBUG: Bracketed capture {i+1}/{len(exposures)} at EV {ev:+.1f}...")
                 frame = self.capture_image(exposure_compensation=ev)
                 frames.append(frame)
             except Exception as e:
@@ -212,15 +231,15 @@ class WaterMeterCamera:
         """
         self.crop_region = (x, y, width, height)
         self.crop_enabled = True
-        print(f"Crop region updated to: {self.crop_region}")
-        print("Note: Camera must be reinitialized for crop to take effect")
+        if self.debug: print(f"DEBUG: Crop region updated to: {self.crop_region}")
+        if self.debug: print("DEBUG: Note: Camera must be reinitialized for crop to take effect")
     
     def enable_crop(self, enabled=True):
         """Enable or disable hardware cropping."""
         self.crop_enabled = enabled
         status = "enabled" if enabled else "disabled"
-        print(f"Hardware crop {status}")
-        print("Note: Camera must be reinitialized for change to take effect")
+        if self.debug: print(f"DEBUG: Hardware crop {status}")
+        if self.debug: print("DEBUG: Note: Camera must be reinitialized for change to take effect")
     
     def get_crop_info(self):
         """Return current crop configuration."""
@@ -244,8 +263,6 @@ class WaterMeterCamera:
                 if self.debug: print("DEBUG: Camera closed successfully")
             except Exception as e:
                 print(f"Error closing camera: {e}")
->>>>+++ REPLACE
-
     
     def __enter__(self):
         """Context manager entry."""
