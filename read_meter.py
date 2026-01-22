@@ -219,14 +219,23 @@ def find_needle(image, cx, cy, radius):
     cv2.circle(ring_mask, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.2), 0, -1)
     target_mask = cv2.bitwise_and(mask, ring_mask)
     
-    ys, xs = np.where(target_mask > 0)
+    # Find contours to isolate the main needle body and ignore disconnected shadows
+    contours, _ = cv2.findContours(target_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return 0, (cx, cy)
+        
+    # Select the largest contour as the needle candidate
+    needle_contour = max(contours, key=cv2.contourArea)
+    
+    # Use only pixels from the largest contour for more robust line fitting
+    needle_pixels_mask = np.zeros_like(target_mask)
+    cv2.drawContours(needle_pixels_mask, [needle_contour], -1, 255, -1)
+    ys, xs = np.where(needle_pixels_mask > 0)
     
     if DEBUG_NEEDLE:
-        # Create a visual overlay of the detection process
         debug_overlay = roi.copy()
-        cv2.circle(debug_overlay, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.9), (255, 255, 0), 1)
-        cv2.circle(debug_overlay, (int(center_roi[0]), int(center_roi[1])), int(radius * 0.2), (255, 255, 0), 1)
-        
+        cv2.drawContours(debug_overlay, [needle_contour], -1, (0, 255, 0), 1)
         prefix = f"data/debug_dial_{int(cx)}_{int(cy)}"
         cv2.imwrite(f"{prefix}_0_roi.jpg", roi)
         cv2.imwrite(f"{prefix}_1_mask.jpg", mask)
