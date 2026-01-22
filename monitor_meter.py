@@ -106,50 +106,62 @@ def main():
                 reading, motion_detected, _ = read_meter_from_frame(frame, motion_det, show_gui=False)
                 
                 now = time.time()
+                timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
 
                 # 3. Handle Leak Detection Logic
                 if motion_detected:
                     if motion_start_time is None:
                         motion_start_time = now
-                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Constant motion detected - leak monitoring active")
+                        print(f"[{timestamp}] MOTION: Constant motion started")
                     elif now - motion_start_time >= LEAK_THRESHOLD_SEC:
                         if not leak_alert_sent:
                             send_leak_alert()
                             leak_alert_sent = True
                 else:
                     if motion_start_time is not None:
-                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Motion stopped - leak timer reset")
+                        duration = now - motion_start_time
+                        print(f"[{timestamp}] MOTION: Motion stopped (lasted {duration:.0f}s)")
                     motion_start_time = None
                     leak_alert_sent = False
 
                 # 4. Handle Usage Calculation and Telemetry Upload
                 if reading is not None:
                     try:
-                        # Convert reading (e.g. "02.0") to float
                         current_reading = float(reading)
                         
                         if last_absolute_reading is not None:
-                            # Calculate delta, handling rollover at 100.0
-                            # % 100 works for positive and negative deltas (rollover)
                             delta = (current_reading - last_absolute_reading) % 100
                             
-                            # Sanity check: if delta is very large, it might be a reading error
-                            # (e.g. 99.9 gallons used in 5 seconds is unlikely)
+                            # Log every reading to help with troubleshooting
+                            if delta > 0:
+                                print(f"[{timestamp}] READING: {reading} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
+                            else:
+                                print(f"[{timestamp}] READING: {reading} (No change)")
+
                             if delta < 50.0: 
                                 accumulated_usage += delta
                             else:
-                                print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Warning: Ignored large delta {delta:.1f}")
+                                print(f"[{timestamp}] WARNING: Ignored large delta {delta:.1f}")
+                        else:
+                            print(f"[{timestamp}] INITIAL READING: {reading}")
                         
                         last_absolute_reading = current_reading
 
                         # Time to upload?
-                        if now - last_upload_time >= UPLOAD_INTERVAL_SEC:
-                            # Round to 1 decimal point
+                        time_since_upload = now - last_upload_time
+                        if time_since_upload >= UPLOAD_INTERVAL_SEC:
                             send_telemetry(round(accumulated_usage, 1))
                             accumulated_usage = 0.0
                             last_upload_time = now
+                        else:
+                            remaining = UPLOAD_INTERVAL_SEC - time_since_upload
+                            if int(now) % 60 < 5: # Print status roughly every minute
+                                print(f"[{timestamp}] STATUS: {accumulated_usage:.1f} gal accumulated. Next upload in {remaining/60:.1f} min")
+
                     except ValueError:
-                        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Warning: Could not parse reading '{reading}'")
+                        print(f"[{timestamp}] WARNING: Could not parse reading '{reading}'")
+                else:
+                    print(f"[{timestamp}] WARNING: Dials not detected in this frame")
 
                 # Check for motion more frequently than we upload
                 # 5 seconds provides good balance between responsiveness and CPU load
