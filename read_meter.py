@@ -33,7 +33,7 @@ SAVE_IMAGE = False
 fig, ax = plt.subplots(figsize=(6, 6))
 
 # Fine rotation adjustment (in degrees, negative = clockwise) - from .env
-FINE_ROTATION_ANGLE = int(os.getenv('FINE_ROTATION_ANGLE', '-4'))
+FINE_ROTATION_ANGLE = float(os.getenv('FINE_ROTATION_ANGLE', '-4'))
 
 # Toggle verbose visualization + saving intermediate masks for debugging
 # Automatically disabled in headless mode - can be overridden in .env

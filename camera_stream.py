@@ -38,7 +38,7 @@ if STREAM_SHOW_DETECTION:
 app = Flask(__name__)
 
 # Fine rotation adjustment (in degrees, negative = clockwise) - loaded from .env
-FINE_ROTATION_ANGLE = int(os.getenv('FINE_ROTATION_ANGLE', '-4'))
+FINE_ROTATION_ANGLE = float(os.getenv('FINE_ROTATION_ANGLE', '-4'))
 
 # Motion detection settings
 MOTION_DETECTION_ENABLED = os.getenv('MOTION_DETECTION_ENABLED', 'false').lower() == 'true'
