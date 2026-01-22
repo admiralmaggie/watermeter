@@ -407,10 +407,16 @@ def process_values(values):
     Process dial values into a single reading string.
     Accounts for needles being between numbers by checking the next dial.
     """
+    # Based on user instruction: Circle 2 is x10, Circle 1 is x1, Circle 0 is x0.1.
+    # find_circles provides values in [Circle 0, Circle 1, Circle 2] order (left-to-right).
+    # We reverse them to process from highest magnitude to lowest.
+    values = values[::-1]
+    
     digits = []
     for i, v in enumerate(values):
         whole = int(np.floor(v))
-        # If not the last dial, check if we need to adjust based on the next dial
+        # If not the last dial (lowest magnitude), check if we need to adjust 
+        # based on the next lower dial.
         if i < len(values) - 1:
             decimals = v - whole
             # If the current dial is just past a number but the next dial is still high (e.g., 9),
@@ -421,7 +427,8 @@ def process_values(values):
         # Use % 10 to handle negative results (e.g., -1 becomes 9)
         digits.append(str(whole % 10))
 
-    # Formatting: If we have 3 or more dials, the last one is typically x0.1
+    # Formatting: If we have 3 or more dials, the last one (lowest magnitude)
+    # is typically the x0.1 dial.
     if len(digits) >= 3:
         return "".join(digits[:-1]) + "." + digits[-1]
     
