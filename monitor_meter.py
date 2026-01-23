@@ -130,22 +130,36 @@ def main():
                         current_reading = float(reading)
                         
                         if last_absolute_reading is not None:
+                            # Calculate delta handling the 100-gallon rollover
                             delta = (current_reading - last_absolute_reading) % 100
                             
-                            # Log every reading to help with troubleshooting
-                            if delta > 0:
-                                print(f"[{timestamp}] READING: {reading} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
+                            # Filter Jitter and Reading Errors:
+                            # A water meter should only move forward.
+                            if delta < 5.0: 
+                                # Case 1: Valid increase or rollover
+                                if delta > 0:
+                                    # Explicitly log rollovers for verification
+                                    if current_reading < last_absolute_reading:
+                                        print(f"[{timestamp}] ROLLOVER DETECTED: {last_absolute_reading} -> {current_reading}")
+                                    
+                                    print(f"[{timestamp}] READING: {reading} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
+                                    accumulated_usage += delta
+                                else:
+                                    print(f"[{timestamp}] READING: {reading} (No change)")
+                                
+                                # Update our reference reading
+                                last_absolute_reading = current_reading
+                            elif delta > 95.0:
+                                # Case 2: Jitter (small negative change like 56.9 -> 56.5)
+                                # We ignore this and don't update last_absolute_reading
+                                print(f"[{timestamp}] JITTER: Ignored {reading} (Previous: {last_absolute_reading})")
                             else:
-                                print(f"[{timestamp}] READING: {reading} (No change)")
-
-                            if delta < 50.0: 
-                                accumulated_usage += delta
-                            else:
-                                print(f"[{timestamp}] WARNING: Ignored large delta {delta:.1f}")
+                                # Case 3: Large jump or suspicious reading
+                                print(f"[{timestamp}] WARNING: Ignored suspicious reading {reading} (Delta: {delta:.1f})")
+                                # We also don't update reference here to wait for consistency
                         else:
                             print(f"[{timestamp}] INITIAL READING: {reading}")
-                        
-                        last_absolute_reading = current_reading
+                            last_absolute_reading = current_reading
 
                         # Time to upload?
                         time_since_upload = now - last_upload_time
