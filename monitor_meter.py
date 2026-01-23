@@ -34,6 +34,11 @@ PUSHOVER_TOKEN = os.getenv('PUSHOVER_TOKEN', 'MISSING_TOKEN')
 PUSHOVER_USER = os.getenv('PUSHOVER_USER', '')
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 
+# Usage tracking thresholds
+MAX_VALID_DELTA = float(os.getenv('MAX_VALID_DELTA', '5.0'))
+JITTER_THRESHOLD = float(os.getenv('JITTER_THRESHOLD', '95.0'))
+RESYNC_THRESHOLD = int(os.getenv('RESYNC_THRESHOLD', '10'))
+
 class MonitorArgs:
     """Mock arguments for get_frame_from_camera."""
     def __init__(self):
@@ -89,6 +94,10 @@ def main():
     
     last_absolute_reading = None
     accumulated_usage = 0.0
+    
+    # Consistency tracking for re-syncing from bad readings
+    candidate_reading = None
+    candidate_count = 0
 
     # Disable image saving by default in monitor mode unless forced
     read_meter.SAVE_IMAGE = os.getenv('SAVE_MONITOR_IMAGES', 'false').lower() == 'true'
@@ -134,29 +143,40 @@ def main():
                             delta = (current_reading - last_absolute_reading) % 100
                             
                             # Filter Jitter and Reading Errors:
-                            # A water meter should only move forward.
-                            if delta < 5.0: 
+                            if delta < MAX_VALID_DELTA: 
                                 # Case 1: Valid increase or rollover
                                 if delta > 0:
-                                    # Explicitly log rollovers for verification
                                     if current_reading < last_absolute_reading:
                                         print(f"[{timestamp}] ROLLOVER DETECTED: {last_absolute_reading} -> {current_reading}")
-                                    
                                     print(f"[{timestamp}] READING: {reading} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
                                     accumulated_usage += delta
                                 else:
                                     print(f"[{timestamp}] READING: {reading} (No change)")
                                 
-                                # Update our reference reading
+                                # Reset candidate tracking on any valid reading
                                 last_absolute_reading = current_reading
-                            elif delta > 95.0:
-                                # Case 2: Jitter (small negative change like 56.9 -> 56.5)
-                                # We ignore this and don't update last_absolute_reading
-                                print(f"[{timestamp}] JITTER: Ignored {reading} (Previous: {last_absolute_reading})")
+                                candidate_reading = None
+                                candidate_count = 0
                             else:
-                                # Case 3: Large jump or suspicious reading
-                                print(f"[{timestamp}] WARNING: Ignored suspicious reading {reading} (Delta: {delta:.1f})")
-                                # We also don't update reference here to wait for consistency
+                                # Case 2: Jitter or Suspicious jump
+                                # Check for consistency among these "ignored" readings to allow for re-sync
+                                if candidate_reading is not None and abs(current_reading - candidate_reading) < 0.5:
+                                    candidate_count += 1
+                                    print(f"[{timestamp}] CONSISTENCY: {reading} confirmed {candidate_count}/{RESYNC_THRESHOLD}")
+                                else:
+                                    candidate_reading = current_reading
+                                    candidate_count = 1
+                                
+                                if candidate_count >= RESYNC_THRESHOLD:
+                                    print(f"[{timestamp}] RE-SYNC: Snapping to {reading} after {RESYNC_THRESHOLD} consistent samples")
+                                    last_absolute_reading = current_reading
+                                    candidate_reading = None
+                                    candidate_count = 0
+                                    # We don't add the jump to accumulated_usage to avoid massive false spikes
+                                elif delta > JITTER_THRESHOLD:
+                                    print(f"[{timestamp}] JITTER: Ignored {reading} (Previous: {last_absolute_reading})")
+                                else:
+                                    print(f"[{timestamp}] WARNING: Ignored suspicious reading {reading} (Delta: {delta:.1f})")
                         else:
                             print(f"[{timestamp}] INITIAL READING: {reading}")
                             last_absolute_reading = current_reading
