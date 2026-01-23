@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import json
+import statistics
 from dotenv import load_dotenv
 import cv2
 import read_meter
@@ -95,7 +96,8 @@ def main():
     last_absolute_reading = None
     accumulated_usage = 0.0
     
-    # Consistency tracking for re-syncing from bad readings
+    # Filtering and Consistency tracking
+    reading_history = []
     candidate_reading = None
     candidate_count = 0
 
@@ -136,7 +138,17 @@ def main():
                 # 4. Handle Usage Calculation and Telemetry Upload
                 if reading is not None:
                     try:
-                        current_reading = float(reading)
+                        # Median filtering: use last 3 readings to eliminate single-frame glitches
+                        raw_val = float(reading)
+                        reading_history.append(raw_val)
+                        if len(reading_history) > 3:
+                            reading_history.pop(0)
+                        
+                        if len(reading_history) < 3:
+                            print(f"[{timestamp}] WARMUP: Collecting samples... ({len(reading_history)}/3)")
+                            continue
+                        
+                        current_reading = round(statistics.median(reading_history), 1)
                         
                         if last_absolute_reading is not None:
                             # Calculate delta handling the 100-gallon rollover
@@ -148,10 +160,12 @@ def main():
                                 if delta > 0:
                                     if current_reading < last_absolute_reading:
                                         print(f"[{timestamp}] ROLLOVER DETECTED: {last_absolute_reading} -> {current_reading}")
-                                    print(f"[{timestamp}] READING: {reading} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
+                                    print(f"[{timestamp}] READING: {current_reading:.1f} (Delta: +{delta:.1f} gal, Total: {accumulated_usage+delta:.1f} gal)")
                                     accumulated_usage += delta
                                 else:
-                                    print(f"[{timestamp}] READING: {reading} (No change)")
+                                    # Don't spam "No change" in logs
+                                    if int(now) % 30 < 5:
+                                        print(f"[{timestamp}] READING: {current_reading:.1f} (Stable)")
                                 
                                 # Reset candidate tracking on any valid reading
                                 last_absolute_reading = current_reading
@@ -162,23 +176,25 @@ def main():
                                 # Check for consistency among these "ignored" readings to allow for re-sync
                                 if candidate_reading is not None and abs(current_reading - candidate_reading) < 0.5:
                                     candidate_count += 1
-                                    print(f"[{timestamp}] CONSISTENCY: {reading} confirmed {candidate_count}/{RESYNC_THRESHOLD}")
+                                    if candidate_count % 2 == 0: # Log every other confirmation to reduce noise
+                                        print(f"[{timestamp}] CONSISTENCY: {current_reading:.1f} confirmed {candidate_count}/{RESYNC_THRESHOLD}")
                                 else:
                                     candidate_reading = current_reading
                                     candidate_count = 1
                                 
                                 if candidate_count >= RESYNC_THRESHOLD:
-                                    print(f"[{timestamp}] RE-SYNC: Snapping to {reading} after {RESYNC_THRESHOLD} consistent samples")
+                                    print(f"[{timestamp}] RE-SYNC: Snapping to {current_reading:.1f} after {RESYNC_THRESHOLD} consistent samples")
                                     last_absolute_reading = current_reading
                                     candidate_reading = None
                                     candidate_count = 0
-                                    # We don't add the jump to accumulated_usage to avoid massive false spikes
                                 elif delta > JITTER_THRESHOLD:
-                                    print(f"[{timestamp}] JITTER: Ignored {reading} (Previous: {last_absolute_reading})")
+                                    # Quiet jitter logging
+                                    if int(now) % 30 < 5:
+                                        print(f"[{timestamp}] JITTER: Ignored {current_reading:.1f} (Previous: {last_absolute_reading})")
                                 else:
-                                    print(f"[{timestamp}] WARNING: Ignored suspicious reading {reading} (Delta: {delta:.1f})")
+                                    print(f"[{timestamp}] WARNING: Ignored suspicious reading {current_reading:.1f} (Delta: {delta:.1f})")
                         else:
-                            print(f"[{timestamp}] INITIAL READING: {reading}")
+                            print(f"[{timestamp}] INITIAL READING: {current_reading:.1f}")
                             last_absolute_reading = current_reading
 
                         # Time to upload?
